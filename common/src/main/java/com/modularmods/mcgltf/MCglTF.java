@@ -60,35 +60,50 @@ public class MCglTF {
         return INSTANCE;
     }
 
-    public void onInitialize(boolean shaderModExists, BooleanSupplier isShaderPackInUse, Consumer<Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>> modelGenerator) {
-        Consumer<Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>> processRenderedGltfModelSelector;
+    protected void generateModel(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup){
+        switch (renderedModelGLProfile) {
+            case GL43:
+                processRenderedGltfModelsGL43(lookup);
+                break;
+            case GL40:
+                processRenderedGltfModelsGL40(lookup);
+                break;
+            case GL33:
+                processRenderedGltfModelsGL33(lookup);
+                break;
+            case GL30:
+                processRenderedGltfModelsGL30(lookup);
+                break;
+            default:
+                GLCapabilities glCapabilities = GL.getCapabilities();
+                if (glCapabilities.glTexBufferRange != 0) processRenderedGltfModelsGL43(lookup);
+                else if (glCapabilities.glGenTransformFeedbacks != 0) processRenderedGltfModelsGL40(lookup);
+                else processRenderedGltfModelsGL33(lookup);
+                break;
+        }
+    }
+
+    public RenderedGltfModel createModel(ResourceLocation location){
+        return switch (renderedModelGLProfile) {
+            case GL43 -> processRenderedGltfModelsGL43(location);
+            case GL40 -> processRenderedGltfModelsGL40(location);
+            case GL33 -> processRenderedGltfModelsGL33(location);
+            case GL30 -> processRenderedGltfModelsGL30(location);
+            default -> {
+                GLCapabilities glCapabilities = GL.getCapabilities();
+                if (glCapabilities.glTexBufferRange != 0) yield processRenderedGltfModelsGL43(location);
+                else if (glCapabilities.glGenTransformFeedbacks != 0) yield processRenderedGltfModelsGL40(location);
+                else yield processRenderedGltfModelsGL33(location);
+            }
+        };
+    }
+
+    public void onInitialize(boolean shaderModExists, BooleanSupplier isShaderPackInUse) {
+        Consumer<Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>> processRenderedGltfModelSelector = this::generateModel;
         if (shaderModExists) {
-            processRenderedGltfModelSelector = modelGenerator;
             shaderModActive = isShaderPackInUse;
         } else {
             shaderModActive = () -> false;
-            processRenderedGltfModelSelector = (lookup) -> {
-                switch (renderedModelGLProfile) {
-                    case GL43:
-                        processRenderedGltfModelsGL43(lookup);
-                        break;
-                    case GL40:
-                        processRenderedGltfModelsGL40(lookup);
-                        break;
-                    case GL33:
-                        processRenderedGltfModelsGL33(lookup);
-                        break;
-                    case GL30:
-                        processRenderedGltfModelsGL30(lookup);
-                        break;
-                    default:
-                        GLCapabilities glCapabilities = GL.getCapabilities();
-                        if (glCapabilities.glTexBufferRange != 0) processRenderedGltfModelsGL43(lookup);
-                        else if (glCapabilities.glGenTransformFeedbacks != 0) processRenderedGltfModelsGL40(lookup);
-                        else processRenderedGltfModelsGL33(lookup);
-                        break;
-                }
-            };
         }
 
         Minecraft.getInstance().execute(() -> {
@@ -354,6 +369,14 @@ public class MCglTF {
         });
     }
 
+    protected RenderedGltfModel processRenderedGltfModels(ResourceLocation location, BiFunction<List<Runnable>, GltfModel, RenderedGltfModel> renderedGltfModelBuilder) {
+        try {
+            return renderedGltfModelBuilder.apply(gltfRenderData, new GltfModelReader().readWithoutReferences(new BufferedInputStream(Minecraft.getInstance().getResourceManager().getResource(location).orElseThrow().open())));
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     protected void processRenderedGltfModelsGL43(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
         processRenderedGltfModels(lookup, RenderedGltfModel::new);
         GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
@@ -377,6 +400,34 @@ public class MCglTF {
     protected void processRenderedGltfModelsGL30(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
         processRenderedGltfModels(lookup, RenderedGltfModelGL30::new);
     }
+
+    protected RenderedGltfModel processRenderedGltfModelsGL43(ResourceLocation location) {
+        RenderedGltfModel m = processRenderedGltfModels(location, RenderedGltfModel::new);
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
+        GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, 0);
+        GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
+        return m;
+    }
+
+    protected RenderedGltfModel processRenderedGltfModelsGL40(ResourceLocation location) {
+        RenderedGltfModel m = processRenderedGltfModels(location, RenderedGltfModelGL40::new);
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
+        GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
+        GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
+        return m;
+    }
+
+    protected RenderedGltfModel processRenderedGltfModelsGL33(ResourceLocation location) {
+        RenderedGltfModel m = processRenderedGltfModels(location, RenderedGltfModelGL33::new);
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
+        GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
+        return m;
+    }
+
+    protected RenderedGltfModel processRenderedGltfModelsGL30(ResourceLocation location) {
+        return processRenderedGltfModels(location, RenderedGltfModelGL30::new);
+    }
+
 
     public EnumRenderedModelGLProfile getRenderedModelGLProfile() {
         return renderedModelGLProfile;

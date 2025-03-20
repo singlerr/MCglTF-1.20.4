@@ -2,6 +2,7 @@ package com.modularmods.mcgltf.fabric;
 
 import com.modularmods.mcgltf.IGltfModelReceiver;
 import com.modularmods.mcgltf.MCglTF;
+import com.modularmods.mcgltf.RenderedGltfModel;
 import com.modularmods.mcgltf.fabric.iris.RenderedGltfModelGL30Iris;
 import com.modularmods.mcgltf.fabric.iris.RenderedGltfModelGL33Iris;
 import com.modularmods.mcgltf.fabric.iris.RenderedGltfModelGL40Iris;
@@ -25,10 +26,11 @@ public final class MCglTFFabric extends MCglTF implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        onInitialize(FabricLoader.getInstance().isModLoaded("iris"), IrisApi.getInstance()::isShaderPackInUse, this::generateModel);
+        onInitialize(FabricLoader.getInstance().isModLoaded("iris"), IrisApi.getInstance()::isShaderPackInUse);
     }
 
-    private void generateModel(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
+    @Override
+    protected void generateModel(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
         switch (renderedModelGLProfile) {
             case GL43:
                 processRenderedGltfModelsGL43Iris(lookup);
@@ -49,6 +51,21 @@ public final class MCglTFFabric extends MCglTF implements ModInitializer {
                 else processRenderedGltfModelsGL33Iris(lookup);
                 break;
         }
+    }
+    @Override
+    public RenderedGltfModel createModel(ResourceLocation location){
+        return switch (renderedModelGLProfile) {
+            case GL43 -> processRenderedGltfModelsGL43Iris(location);
+            case GL40 -> processRenderedGltfModelsGL40Iris(location);
+            case GL33 -> processRenderedGltfModelsGL33Iris(location);
+            case GL30 -> processRenderedGltfModelsGL30Iris(location);
+            default -> {
+                GLCapabilities glCapabilities = GL.getCapabilities();
+                if (glCapabilities.glTexBufferRange != 0) yield processRenderedGltfModelsGL43Iris(location);
+                else if (glCapabilities.glGenTransformFeedbacks != 0) yield processRenderedGltfModelsGL40Iris(location);
+                else yield processRenderedGltfModelsGL33Iris(location);
+            }
+        };
     }
 
     private void processRenderedGltfModelsGL43Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
@@ -73,5 +90,34 @@ public final class MCglTFFabric extends MCglTF implements ModInitializer {
 
     private void processRenderedGltfModelsGL30Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
         processRenderedGltfModels(lookup, RenderedGltfModelGL30Iris::new);
+    }
+
+    private RenderedGltfModel processRenderedGltfModelsGL43Iris(ResourceLocation location) {
+        RenderedGltfModel m = processRenderedGltfModels(location, RenderedGltfModelIris::new);
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
+        GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, 0);
+        GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
+        return m;
+    }
+
+    private RenderedGltfModel processRenderedGltfModelsGL40Iris(ResourceLocation location) {
+        RenderedGltfModel m = processRenderedGltfModels(location, RenderedGltfModelGL40Iris::new);
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
+        GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
+        GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
+        return m;
+
+    }
+
+    private RenderedGltfModel processRenderedGltfModelsGL33Iris(ResourceLocation location) {
+        RenderedGltfModel m = processRenderedGltfModels(location, RenderedGltfModelGL33Iris::new);
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
+        GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
+        return m;
+    }
+
+
+    private RenderedGltfModel processRenderedGltfModelsGL30Iris(ResourceLocation location) {
+        return processRenderedGltfModels(location, RenderedGltfModelGL30Iris::new);
     }
 }

@@ -144,9 +144,9 @@ public class IrisRenderingHook {
             int currentTextureColor;
 
             if (normals != -1) {
-                RenderedGltfModel.NORMAL_MAP_INDEX = GL13.GL_TEXTURE2 + GL20.glGetUniformi(currentProgram, normals);
+                RenderedGltfModel.NORMAL_MAP_INDEX = GL13.GL_TEXTURE0 + GL20.glGetUniformi(currentProgram, normals);
                 if (specular != -1) {
-                    RenderedGltfModel.SPECULAR_MAP_INDEX = GL13.GL_TEXTURE1 + GL20.glGetUniformi(currentProgram, specular);
+                    RenderedGltfModel.SPECULAR_MAP_INDEX = GL13.GL_TEXTURE0 + GL20.glGetUniformi(currentProgram, specular);
 
                     GL13.glActiveTexture(RenderedGltfModel.NORMAL_MAP_INDEX);
                     int currentTextureNormal = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);

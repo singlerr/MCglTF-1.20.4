@@ -1,0 +1,70 @@
+name: Build Mod and Upload Artifacts
+
+on:
+  push:
+    branches: [ "**" ]
+    tags: [ "v*", "*.*.*" ]
+  pull_request:
+    branches: [ "**" ]
+
+permissions:
+  contents: write  # needed for creating a GitHub Release on tag pushes
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }} with JDK ${{ matrix.java }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        java: [ 17 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
+
+      - name: Make gradlew executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x ./gradlew
+
+      - name: Build
+        run: ./gradlew --no-daemon clean build
+
+      - name: Upload build artifacts (all jars)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-jars-${{ github.sha }}
+          path: |
+            build/libs/*.jar
+          if-no-files-found: error
+
+      - name: Upload debug logs (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-logs-${{ github.sha }}
+          path: |
+            **/build/reports/**
+            **/build/test-results/**
+          if-no-files-found: ignore
+
+      - name: Create GitHub Release and upload jars (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/libs/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

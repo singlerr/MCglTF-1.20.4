@@ -32,13 +32,14 @@ import java.util.List;
  * An interface for the information about the extensions that are used in a
  * {@link GltfModel}.
  */
-public interface ExtensionsModel {
+public interface ExtensionsModel
+{
     /**
      * Returns the list of extension names that are declared as the
      * <code>extensionsUsed</code> in the glTF asset.
-     * <p>
+     * 
      * The list should be assumed to be unmodifiable.
-     *
+     * 
      * @return The list of used extensions
      */
     List<String> getExtensionsUsed();
@@ -46,9 +47,9 @@ public interface ExtensionsModel {
     /**
      * Returns the list of extension names that are declared as the
      * <code>extensionsRequired</code> in the glTF asset.
-     * <p>
+     * 
      * The list should be assumed to be unmodifiable.
-     *
+     * 
      * @return The list of required extensions
      */
     List<String> getExtensionsRequired();

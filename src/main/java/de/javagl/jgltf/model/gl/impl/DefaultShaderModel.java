@@ -26,68 +26,77 @@
  */
 package de.javagl.jgltf.model.gl.impl;
 
+import java.nio.ByteBuffer;
+
 import de.javagl.jgltf.model.gl.ShaderModel;
 import de.javagl.jgltf.model.impl.AbstractNamedModelElement;
 import de.javagl.jgltf.model.io.Buffers;
-
-import java.nio.ByteBuffer;
 
 /**
  * Implementation of a {@link ShaderModel}
  */
 public class DefaultShaderModel extends AbstractNamedModelElement
-        implements ShaderModel {
+    implements ShaderModel
+{
     /**
-     * The URI
+     * The URI 
      */
     private final String uri;
-    /**
-     * The {@link ShaderType}
-     */
-    private final ShaderType shaderType;
+    
     /**
      * The actual raw shader data
      */
     private ByteBuffer shaderData;
 
     /**
-     * Default constructor
-     *
-     * @param uri        The URI
-     * @param shaderType The
-     *                   {@link ShaderType}
+     * The {@link ShaderType}
      */
-    public DefaultShaderModel(String uri, ShaderType shaderType) {
+    private final ShaderType shaderType;
+    
+    /**
+     * Default constructor 
+     * 
+     * @param uri The URI
+     * @param shaderType The 
+     * {@link ShaderType}
+     */
+    public DefaultShaderModel(String uri, ShaderType shaderType)
+    {
         this.uri = uri;
         this.shaderType = shaderType;
     }
-
-    @Override
-    public String getUri() {
-        return uri;
-    }
-
-    @Override
-    public ByteBuffer getShaderData() {
-        return Buffers.createSlice(shaderData);
-    }
-
+    
     /**
      * Set the data of this shader
-     *
+     * 
      * @param shaderData The shader data
      */
-    public void setShaderData(ByteBuffer shaderData) {
+    public void setShaderData(ByteBuffer shaderData)
+    {
         this.shaderData = shaderData;
     }
 
     @Override
-    public String getShaderSource() {
-        return Buffers.readAsString(shaderData);
+    public String getUri()
+    {
+        return uri;
     }
 
     @Override
-    public ShaderType getShaderType() {
+    public ByteBuffer getShaderData()
+    {
+        return Buffers.createSlice(shaderData);
+    }
+
+    @Override
+    public String getShaderSource()
+    {
+        return Buffers.readAsString(shaderData);
+    }
+    
+    @Override
+    public ShaderType getShaderType()
+    {
         return shaderType;
     }
 }

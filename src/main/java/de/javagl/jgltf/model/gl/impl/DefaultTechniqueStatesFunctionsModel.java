@@ -31,12 +31,13 @@ import de.javagl.jgltf.model.gl.TechniqueStatesFunctionsModel;
 /**
  * Default implementation of a {@link TechniqueStatesFunctionsModel}.<br>
  * <br>
- * <b>Note: The method comments here are placeholders. For details, refer
+ * <b>Note: The method comments here are placeholders. For details, refer 
  * to the glTF 1.0 specification and an OpenGL documentation!</b><br>
  * <br>
  */
 public class DefaultTechniqueStatesFunctionsModel
-        implements TechniqueStatesFunctionsModel {
+    implements TechniqueStatesFunctionsModel
+{
     /**
      * The BlendColor
      */
@@ -95,12 +96,14 @@ public class DefaultTechniqueStatesFunctionsModel
     /**
      * Default constructor
      */
-    public DefaultTechniqueStatesFunctionsModel() {
+    public DefaultTechniqueStatesFunctionsModel()
+    {
         // Default constructor
     }
 
     @Override
-    public float[] getBlendColor() {
+    public float[] getBlendColor()
+    {
         return blendColor;
     }
 
@@ -109,12 +112,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param blendColor The BlendColor
      */
-    public void setBlendColor(float[] blendColor) {
+    public void setBlendColor(float[] blendColor)
+    {
         this.blendColor = blendColor;
     }
 
     @Override
-    public int[] getBlendEquationSeparate() {
+    public int[] getBlendEquationSeparate()
+    {
         return blendEquationSeparate;
     }
 
@@ -123,12 +128,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param blendEquationSeparate The BlendEquationSeparate
      */
-    public void setBlendEquationSeparate(int[] blendEquationSeparate) {
+    public void setBlendEquationSeparate(int[] blendEquationSeparate)
+    {
         this.blendEquationSeparate = blendEquationSeparate;
     }
 
     @Override
-    public int[] getBlendFuncSeparate() {
+    public int[] getBlendFuncSeparate()
+    {
         return blendFuncSeparate;
     }
 
@@ -137,12 +144,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param blendFuncSeparate The BlendFuncSeparate
      */
-    public void setBlendFuncSeparate(int[] blendFuncSeparate) {
+    public void setBlendFuncSeparate(int[] blendFuncSeparate)
+    {
         this.blendFuncSeparate = blendFuncSeparate;
     }
 
     @Override
-    public boolean[] getColorMask() {
+    public boolean[] getColorMask()
+    {
         return colorMask;
     }
 
@@ -151,12 +160,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param colorMask The ColorMask
      */
-    public void setColorMask(boolean[] colorMask) {
+    public void setColorMask(boolean[] colorMask)
+    {
         this.colorMask = colorMask;
     }
 
     @Override
-    public int[] getCullFace() {
+    public int[] getCullFace()
+    {
         return cullFace;
     }
 
@@ -165,12 +176,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param cullFace The CullFace
      */
-    public void setCullFace(int[] cullFace) {
+    public void setCullFace(int[] cullFace)
+    {
         this.cullFace = cullFace;
     }
 
     @Override
-    public int[] getDepthFunc() {
+    public int[] getDepthFunc()
+    {
         return depthFunc;
     }
 
@@ -179,12 +192,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param depthFunc The DepthFunc
      */
-    public void setDepthFunc(int[] depthFunc) {
+    public void setDepthFunc(int[] depthFunc)
+    {
         this.depthFunc = depthFunc;
     }
 
     @Override
-    public boolean[] getDepthMask() {
+    public boolean[] getDepthMask()
+    {
         return depthMask;
     }
 
@@ -193,12 +208,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param depthMask The DepthMask
      */
-    public void setDepthMask(boolean[] depthMask) {
+    public void setDepthMask(boolean[] depthMask)
+    {
         this.depthMask = depthMask;
     }
 
     @Override
-    public float[] getDepthRange() {
+    public float[] getDepthRange()
+    {
         return depthRange;
     }
 
@@ -207,12 +224,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param depthRange The DepthRange
      */
-    public void setDepthRange(float[] depthRange) {
+    public void setDepthRange(float[] depthRange)
+    {
         this.depthRange = depthRange;
     }
 
     @Override
-    public int[] getFrontFace() {
+    public int[] getFrontFace()
+    {
         return frontFace;
     }
 
@@ -221,12 +240,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param frontFace The FrontFace
      */
-    public void setFrontFace(int[] frontFace) {
+    public void setFrontFace(int[] frontFace)
+    {
         this.frontFace = frontFace;
     }
 
     @Override
-    public float[] getLineWidth() {
+    public float[] getLineWidth()
+    {
         return lineWidth;
     }
 
@@ -235,12 +256,14 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param lineWidth The LineWidth
      */
-    public void setLineWidth(float[] lineWidth) {
+    public void setLineWidth(float[] lineWidth)
+    {
         this.lineWidth = lineWidth;
     }
 
     @Override
-    public float[] getPolygonOffset() {
+    public float[] getPolygonOffset()
+    {
         return polygonOffset;
     }
 
@@ -249,7 +272,8 @@ public class DefaultTechniqueStatesFunctionsModel
      *
      * @param polygonOffset The PolygonOffset
      */
-    public void setPolygonOffset(float[] polygonOffset) {
+    public void setPolygonOffset(float[] polygonOffset)
+    {
         this.polygonOffset = polygonOffset;
     }
 

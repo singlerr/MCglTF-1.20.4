@@ -27,6 +27,7 @@
 package de.javagl.jgltf.model.io.v2;
 
 import com.google.gson.Gson;
+
 import de.javagl.jgltf.impl.v2.BufferView;
 import de.javagl.jgltf.impl.v2.GlTF;
 import de.javagl.jgltf.impl.v2.Image;
@@ -35,14 +36,8 @@ import de.javagl.jgltf.model.GltfException;
 /**
  * Utility methods related to {@link GlTF}s
  */
-class GltfUtilsV2 {
-    /**
-     * Private constructor to prevent instantiation
-     */
-    private GltfUtilsV2() {
-        // Private constructor to prevent instantiation
-    }
-
+class GltfUtilsV2
+{
     /**
      * Creates a deep copy of the given {@link GlTF}.<br>
      * <br>
@@ -51,23 +46,25 @@ class GltfUtilsV2 {
      * in the copy. The goal of this method is to create a copy that is,
      * as far as reasonably possible, "structurally equivalent" to the
      * given input.
-     *
-     * @param gltf The input
+     * 
+     * @param gltf The input 
      * @return The copy
      * @throws GltfException If the copy can not be created
      */
-    static GlTF copy(GlTF gltf) {
-        Gson gson = new Gson();
-        return gson.fromJson(gson.toJsonTree(gltf, GlTF.class), GlTF.class);
+    static GlTF copy(GlTF gltf)
+    {
+    	Gson gson = new Gson();
+    	return gson.fromJson(gson.toJsonTree(gltf, GlTF.class), GlTF.class);
     }
 
     /**
      * Creates a shallow copy of the given {@link BufferView}
-     *
+     * 
      * @param bufferView The {@link BufferView}
      * @return The copy
      */
-    static BufferView copy(BufferView bufferView) {
+    static BufferView copy(BufferView bufferView)
+    {
         BufferView copy = new BufferView();
         copy.setExtensions(bufferView.getExtensions());
         copy.setExtras(bufferView.getExtras());
@@ -79,14 +76,16 @@ class GltfUtilsV2 {
         copy.setByteStride(bufferView.getByteStride());
         return copy;
     }
-
+    
+    
     /**
      * Creates a shallow copy of the given {@link Image}
-     *
+     * 
      * @param image The {@link Image}
      * @return The copy
      */
-    static Image copy(Image image) {
+    static Image copy(Image image)
+    {
         Image copy = new Image();
         copy.setExtensions(image.getExtensions());
         copy.setExtras(image.getExtras());
@@ -95,5 +94,13 @@ class GltfUtilsV2 {
         copy.setBufferView(image.getBufferView());
         copy.setMimeType(image.getMimeType());
         return copy;
+    }
+    
+    /**
+     * Private constructor to prevent instantiation
+     */
+    private GltfUtilsV2()
+    {
+        // Private constructor to prevent instantiation
     }
 }

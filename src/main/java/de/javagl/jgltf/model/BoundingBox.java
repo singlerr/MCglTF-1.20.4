@@ -31,41 +31,43 @@ import java.util.Objects;
 /**
  * A very simple (package-private!) bounding box implementation
  */
-class BoundingBox {
+class BoundingBox
+{
     /**
      * The minimum x coordinate
      */
     private float minX;
-
+    
     /**
      * The minimum y coordinate
      */
     private float minY;
-
+    
     /**
      * The minimum z coordinate
      */
     private float minZ;
-
+    
     /**
      * The maximum x coordinate
      */
     private float maxX;
-
+    
     /**
      * The maximum y coordinate
      */
     private float maxY;
-
+    
     /**
      * The maximum z coordinate
      */
     private float maxZ;
 
     /**
-     * Creates a bounding box
+     * Creates a bounding box  
      */
-    BoundingBox() {
+    BoundingBox()
+    {
         minX = Float.MAX_VALUE;
         minY = Float.MAX_VALUE;
         minZ = Float.MAX_VALUE;
@@ -73,15 +75,16 @@ class BoundingBox {
         maxY = -Float.MAX_VALUE;
         maxZ = -Float.MAX_VALUE;
     }
-
+    
     /**
      * Combine this bounding box with the given point
-     *
+     * 
      * @param x The x-coordinate
      * @param y The y-coordinate
      * @param z The z-coordinate
      */
-    void combine(float x, float y, float z) {
+    void combine(float x, float y, float z)
+    {
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         minZ = Math.min(minZ, z);
@@ -92,10 +95,11 @@ class BoundingBox {
 
     /**
      * Combine this bounding box with the given one
-     *
+     * 
      * @param other The other bounding box
      */
-    void combine(BoundingBox other) {
+    void combine(BoundingBox other)
+    {
         Objects.requireNonNull(other, "The other bounding box may not be null");
         minX = Math.min(minX, other.getMinX());
         minY = Math.min(minY, other.getMinY());
@@ -110,7 +114,8 @@ class BoundingBox {
      *
      * @return The x-coordinate of the center
      */
-    float getCenterX() {
+    float getCenterX()
+    {
         return getMinX() + getSizeX() * 0.5f;
     }
 
@@ -119,7 +124,8 @@ class BoundingBox {
      *
      * @return The y-coordinate of the center
      */
-    float getCenterY() {
+    float getCenterY()
+    {
         return getMinY() + getSizeY() * 0.5f;
     }
 
@@ -128,7 +134,8 @@ class BoundingBox {
      *
      * @return The z-coordinate of the center
      */
-    float getCenterZ() {
+    float getCenterZ()
+    {
         return getMinZ() + getSizeZ() * 0.5f;
     }
 
@@ -137,7 +144,8 @@ class BoundingBox {
      *
      * @return The size in x-direction
      */
-    float getSizeX() {
+    float getSizeX()
+    {
         return getMaxX() - getMinX();
     }
 
@@ -146,7 +154,8 @@ class BoundingBox {
      *
      * @return The size in y-direction
      */
-    float getSizeY() {
+    float getSizeY()
+    {
         return getMaxY() - getMinY();
     }
 
@@ -155,7 +164,8 @@ class BoundingBox {
      *
      * @return The size in z-direction
      */
-    float getSizeZ() {
+    float getSizeZ()
+    {
         return getMaxZ() - getMinZ();
     }
 
@@ -164,7 +174,8 @@ class BoundingBox {
      *
      * @return The minimum x coordinate
      */
-    float getMinX() {
+    float getMinX()
+    {
         return minX;
     }
 
@@ -173,7 +184,8 @@ class BoundingBox {
      *
      * @return The minimum y coordinate
      */
-    float getMinY() {
+    float getMinY()
+    {
         return minY;
     }
 
@@ -182,7 +194,8 @@ class BoundingBox {
      *
      * @return The minimum z coordinate
      */
-    float getMinZ() {
+    float getMinZ()
+    {
         return minZ;
     }
 
@@ -191,7 +204,8 @@ class BoundingBox {
      *
      * @return The maximum x coordinate
      */
-    float getMaxX() {
+    float getMaxX()
+    {
         return maxX;
     }
 
@@ -200,7 +214,8 @@ class BoundingBox {
      *
      * @return The maximum y coordinate
      */
-    float getMaxY() {
+    float getMaxY()
+    {
         return maxY;
     }
 
@@ -209,14 +224,16 @@ class BoundingBox {
      *
      * @return The maximum z coordinate
      */
-    float getMaxZ() {
+    float getMaxZ()
+    {
         return maxZ;
     }
-
+    
     @Override
-    public String toString() {
-        return "[(" +
-                getMinX() + "," + getMinY() + "," + getMinZ() + ")-(" +
-                getMaxX() + "," + getMaxY() + "," + getMaxZ() + ")]";
+    public String toString()
+    {
+        return "[(" + 
+            getMinX() + "," + getMinY() + "," + getMinZ() + ")-(" + 
+            getMaxX() + "," + getMaxY() + "," + getMaxZ() + ")]";
     }
 }

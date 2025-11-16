@@ -29,33 +29,34 @@ package de.javagl.jgltf.model;
 /**
  * Interface for an perspective camera
  */
-public interface CameraPerspectiveModel {
+public interface CameraPerspectiveModel
+{
     /**
      * Returns the aspect ratio
-     *
+     *  
      * @return The aspect ratio
      */
     Float getAspectRatio();
-
+    
     /**
      * Returns the FOV, in y-direction, in radians
-     *
+     * 
      * @return The FOV
      */
     Float getYfov();
-
+    
     /**
      * Returns the distance of the far clipping plane
-     *
+     * 
      * @return The distance
      */
     Float getZfar();
-
+    
     /**
      * Returns the distance of the near clipping plane
-     *
+     * 
      * @return The distance
      */
     Float getZnear();
-
+    
 }

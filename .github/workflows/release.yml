@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "gradle.properties mod_version (leading v optional)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve and validate release version
+        id: release
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          project_version="$(sed -n 's/^mod_version=//p' gradle.properties | head -n 1)"
+          if [[ -z "$project_version" ]]; then
+            echo "mod_version is missing from gradle.properties" >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+            echo "Invalid release version: $version" >&2
+            exit 1
+          fi
+          if [[ "$version" != "$project_version" ]]; then
+            echo "Release version '$version' does not match mod_version '$project_version'" >&2
+            exit 1
+          fi
+
+          prerelease=false
+          normalized_version="${version,,}"
+          if [[ "$normalized_version" =~ (^|[._+-])(alpha|beta|rc)([._+-]|$) ]]; then
+            prerelease=true
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        run: ./gradlew clean build --no-daemon
+
+      - name: Collect release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          mapfile -t artifacts < <(
+            find build/libs -maxdepth 1 -type f -name '*.jar' \
+              ! -name '*-dev.jar' \
+              ! -name '*-all.jar' \
+              -print | sort
+          )
+          if (( ${#artifacts[@]} == 0 )); then
+            echo "No release JARs found in build/libs" >&2
+            exit 1
+          fi
+          cp "${artifacts[@]}" release-artifacts/
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCglTF-${{ steps.release.outputs.version }}
+          path: release-artifacts/*.jar
+          if-no-files-found: error
+
+      - name: Create release tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            tagged_commit="$(git rev-list -n 1 "$TAG")"
+            if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+              echo "Tag $TAG already points to $tagged_commit, not $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "Tag $TAG already exists on this commit"
+          else
+            status=$?
+            if [[ "$status" != "2" ]]; then
+              echo "Could not check remote tag $TAG (git ls-remote exit $status)" >&2
+              exit "$status"
+            fi
+            git tag -a "$TAG" "$GITHUB_SHA" -m "Release $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: MCglTF ${{ steps.release.outputs.version }}
+          files: release-artifacts/*.jar
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ steps.release.outputs.prerelease }}

@@ -65,6 +65,10 @@ world textures. The same run renders 1, 2, 4, and 8 mixed VRM instances and logs
 and submitted vertices. Iris tests use its OpenGL backend; Iris does not run on Minecraft 26.2's experimental Vulkan
 backend.
 
+VRM fixtures are intentionally excluded from Git because their licenses do not permit redistribution. Place authorized
+local copies at `test_models/transformed_wakgood.vrm` and `test_models/transformed_jingburger.vrm`; fixture-dependent
+unit tests are skipped and `runClientGameTest` is disabled when they are absent.
+
 ## Release
 
 Set `mod_version` in `gradle.properties`, commit and push the release commit, then run:

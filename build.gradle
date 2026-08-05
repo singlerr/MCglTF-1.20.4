@@ -108,6 +108,8 @@ tasks.register("prepareIrisGameTest") {
 
 tasks.named("runClientGameTest") {
     dependsOn tasks.named("prepareIrisGameTest")
+    onlyIf { file("test_models/transformed_wakgood.vrm").isFile()
+        && file("test_models/transformed_jingburger.vrm").isFile() }
     systemProperty "mcgltf.gametest.requireIris", providers.gradleProperty("requireIris").orElse("false").get()
 }
 

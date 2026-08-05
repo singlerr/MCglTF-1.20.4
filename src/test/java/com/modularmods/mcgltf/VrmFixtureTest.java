@@ -3,6 +3,7 @@ package com.modularmods.mcgltf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
@@ -39,6 +40,7 @@ class VrmFixtureTest {
 	private static void verify(String fileName, String sha256, int nodes, int meshes, int primitives, int images,
 		int skins, int maxMorphTargets, int maskedMaterials) throws Exception {
 		Path path = Path.of("test_models", fileName);
+		assumeTrue(Files.isRegularFile(path), "Local licensed fixture is not available: " + path);
 		assertEquals(sha256, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path))));
 
 		GltfModel model = new GltfModelReader().read(path);

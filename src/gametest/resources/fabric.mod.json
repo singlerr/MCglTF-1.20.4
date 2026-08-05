@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "mcgltf-gametest",
+  "version": "1.0.0",
+  "name": "MCglTF Client GameTest",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.modularmods.mcgltf.gametest.MCglTFGameTestClient"
+    ],
+    "fabric-client-gametest": [
+      "com.modularmods.mcgltf.gametest.MCglTFClientGameTest"
+    ]
+  },
+  "mixins": [
+    "mcgltf.gametest.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
+    "mcgltf": "*",
+    "minecraft": "~26.2",
+    "java": ">=25"
+  }
+}

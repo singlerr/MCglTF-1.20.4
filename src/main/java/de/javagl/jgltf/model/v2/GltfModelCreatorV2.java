@@ -120,7 +120,7 @@ import de.javagl.jgltf.model.io.IO;
 import de.javagl.jgltf.model.io.v2.GltfAssetV2;
 import de.javagl.jgltf.model.v2.MaterialModelV2.AlphaMode;
 import de.javagl.jgltf.model.v2.gl.Materials;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 /**
  * A class that is responsible for filling a {@link DefaultGltfModel} with
@@ -837,7 +837,7 @@ public class GltfModelCreatorV2
         	if(extras != null) {
         		JsonElement extra = new Gson().toJsonTree(extras).getAsJsonObject().get(MCglTF.RESOURCE_LOCATION);
         		if(extra != null) {
-        			bufferModel.setBufferData(MCglTF.getInstance().getBufferResource(new ResourceLocation(extra.getAsString())));
+					bufferModel.setBufferData(MCglTF.getInstance().getBufferResource(Identifier.parse(extra.getAsString())));
         			continue;
         		}
         	}
@@ -1134,7 +1134,7 @@ public class GltfModelCreatorV2
         	if(extras != null) {
         		JsonElement extra = new Gson().toJsonTree(extras).getAsJsonObject().get(MCglTF.RESOURCE_LOCATION);
         		if(extra != null) {
-        			imageModel.setImageData(MCglTF.getInstance().getImageResource(new ResourceLocation(extra.getAsString())));
+					imageModel.setImageData(MCglTF.getInstance().getImageResource(Identifier.parse(extra.getAsString())));
         			continue;
         		}
         	}

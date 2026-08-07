@@ -19,6 +19,11 @@ public final class RenderedGltfScene {
 	}
 
 	public void submit(PoseStack poseStack, SubmitNodeCollector collector, int packedLight, int packedOverlay) {
+		submit(poseStack, collector, packedLight, packedOverlay, RenderedGltfModel.FULL_VIEW);
+	}
+
+	public void submit(PoseStack poseStack, SubmitNodeCollector collector, int packedLight, int packedOverlay,
+		RenderedGltfModel.RenderView view) {
 		long frameTime = Minecraft.getInstance().getFrameTimeNs();
 		if (frameTime != snapshotFrameTime) {
 			// ponytail: one shared model pose is snapshotted per Minecraft frame; use separate
@@ -28,7 +33,7 @@ public final class RenderedGltfScene {
 			shaderModActive = MCglTF.getInstance().isShaderModActive();
 		}
 		for (RenderedGltfModel.Primitive primitive : primitives) {
-			primitive.submit(poseStack, collector, packedLight, packedOverlay, frameSnapshots, shaderModActive);
+			primitive.submit(poseStack, collector, packedLight, packedOverlay, frameSnapshots, shaderModActive, view);
 		}
 	}
 

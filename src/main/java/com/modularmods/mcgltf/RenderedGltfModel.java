@@ -12,11 +12,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.joml.Matrix3f;
@@ -63,6 +65,7 @@ import net.minecraft.util.LightCoordsUtil;
 public class RenderedGltfModel {
 
 	private static final AtomicInteger NEXT_MODEL_ID = new AtomicInteger();
+	public static final RenderView FULL_VIEW = new RenderView(Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
 
 	public final GltfModel gltfModel;
 	public final List<RenderedGltfScene> renderedGltfScenes;
@@ -89,7 +92,29 @@ public class RenderedGltfModel {
 	}
 
 	public void submit(int sceneIndex, PoseStack poseStack, SubmitNodeCollector collector, int packedLight, int packedOverlay) {
-		renderedGltfScenes.get(sceneIndex).submit(poseStack, collector, packedLight, packedOverlay);
+		submit(sceneIndex, poseStack, collector, packedLight, packedOverlay, FULL_VIEW);
+	}
+
+	public void submit(int sceneIndex, PoseStack poseStack, SubmitNodeCollector collector, int packedLight,
+		int packedOverlay, RenderView view) {
+		renderedGltfScenes.get(sceneIndex).submit(poseStack, collector, packedLight, packedOverlay, view);
+	}
+
+	public record RenderView(Set<NodeModel> hiddenJoints, Set<NodeModel> hiddenNodes, Set<MeshModel> hiddenMeshes,
+		Set<NodeModel> weightFilteredNodes, Set<MeshModel> weightFilteredMeshes) {
+		public RenderView {
+			hiddenJoints = identityCopy(hiddenJoints);
+			hiddenNodes = identityCopy(hiddenNodes);
+			hiddenMeshes = identityCopy(hiddenMeshes);
+			weightFilteredNodes = identityCopy(weightFilteredNodes);
+			weightFilteredMeshes = identityCopy(weightFilteredMeshes);
+		}
+
+		private static <T> Set<T> identityCopy(Set<T> source) {
+			Set<T> copy = Collections.newSetFromMap(new IdentityHashMap<>());
+			copy.addAll(source);
+			return Collections.unmodifiableSet(copy);
+		}
 	}
 
 	private static void collectPrimitives(NodeModel node, TextureRegistry textures, List<Primitive> output,
@@ -108,6 +133,22 @@ public class RenderedGltfModel {
 		for (NodeModel child : node.getChildren()) {
 			collectPrimitives(child, textures, output, visited);
 		}
+	}
+
+	static int[] filterTriangles(int[] indices, boolean[] hiddenVertices) {
+		int[] kept = new int[indices.length];
+		int count = 0;
+		for (int i = 0; i < indices.length; i += 3) {
+			int a = indices[i];
+			int b = indices[i + 1];
+			int c = indices[i + 2];
+			if (!hiddenVertices[a] && !hiddenVertices[b] && !hiddenVertices[c]) {
+				kept[count++] = a;
+				kept[count++] = b;
+				kept[count++] = c;
+			}
+		}
+		return count == indices.length ? indices : Arrays.copyOf(kept, count);
 	}
 
 	static final class FrameSnapshots {
@@ -156,6 +197,7 @@ public class RenderedGltfModel {
 		private final int[] joints;
 		private final float[] weights;
 		private final PreparedMaterial material;
+		private final IdentityHashMap<RenderView, int[]> viewIndices = new IdentityHashMap<>();
 		private DeformedGeometry cachedGeometry;
 		private Matrix4f[] cachedSkinMatrices;
 		private float[] cachedMorphWeights;
@@ -227,9 +269,13 @@ public class RenderedGltfModel {
 		}
 
 		void submit(PoseStack poseStack, SubmitNodeCollector collector, int packedLight, int packedOverlay,
-			FrameSnapshots snapshots, boolean shaderModActive) {
+			FrameSnapshots snapshots, boolean shaderModActive, RenderView view) {
 			float[] scale = node.getScale();
 			if (scale != null && scale[0] == 0.0F && scale[1] == 0.0F && scale[2] == 0.0F) {
+				return;
+			}
+			int[] submittedIndices = indicesFor(view);
+			if (submittedIndices.length == 0) {
 				return;
 			}
 
@@ -244,20 +290,20 @@ public class RenderedGltfModel {
 			poseStack.pushPose();
 			poseStack.mulPose(nodeTransform);
 			collector.submitCustomGeometry(poseStack, material.renderType(),
-				(pose, consumer) -> render(pose, consumer, light, packedOverlay, geometry));
+				(pose, consumer) -> render(pose, consumer, light, packedOverlay, geometry, submittedIndices));
 			poseStack.popPose();
 		}
 
 		private void render(PoseStack.Pose pose, VertexConsumer consumer, int packedLight, int packedOverlay,
-			DeformedGeometry geometry) {
+			DeformedGeometry geometry, int[] submittedIndices) {
 			Vector3f edgeA = new Vector3f();
 			Vector3f edgeB = new Vector3f();
 			Vector3f faceNormal = new Vector3f();
 
-			for (int i = 0; i < indices.length; i += 3) {
-				int a = indices[i];
-				int b = indices[i + 1];
-				int c = indices[i + 2];
+			for (int i = 0; i < submittedIndices.length; i += 3) {
+				int a = submittedIndices[i];
+				int b = submittedIndices[i + 1];
+				int c = submittedIndices[i + 2];
 				if (normals == null) {
 					int pa = a * 3;
 					int pb = b * 3;
@@ -281,6 +327,43 @@ public class RenderedGltfModel {
 				// vertex preserves the glTF triangle and makes the second quad triangle degenerate.
 				emit(consumer, pose, geometry, c, flatNormal, packedLight, packedOverlay);
 			}
+		}
+
+		private int[] indicesFor(RenderView view) {
+			if (view == FULL_VIEW) {
+				return indices;
+			}
+			return viewIndices.computeIfAbsent(view, this::buildViewIndices);
+		}
+
+		private int[] buildViewIndices(RenderView view) {
+			if (view.hiddenNodes().contains(node) || view.hiddenMeshes().contains(mesh)) {
+				return new int[0];
+			}
+			if (!view.weightFilteredNodes().contains(node) && !view.weightFilteredMeshes().contains(mesh)) {
+				return indices;
+			}
+			if (view.hiddenJoints().contains(node)) {
+				return new int[0];
+			}
+			if (skin == null || influences == 0) {
+				return indices;
+			}
+
+			List<NodeModel> skinJoints = skin.getJoints();
+			boolean[] hiddenVertices = new boolean[vertexCount];
+			for (int vertex = 0; vertex < vertexCount; vertex++) {
+				int offset = vertex * influences;
+				for (int influence = 0; influence < influences; influence++) {
+					int joint = joints[offset + influence];
+					if (weights[offset + influence] > 0.0F && joint >= 0 && joint < skinJoints.size()
+						&& view.hiddenJoints().contains(skinJoints.get(joint))) {
+						hiddenVertices[vertex] = true;
+						break;
+					}
+				}
+			}
+			return filterTriangles(indices, hiddenVertices);
 		}
 
 		private DeformedGeometry deform(SkinPalette palette, float[] currentMorphWeights) {

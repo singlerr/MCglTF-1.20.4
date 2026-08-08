@@ -17,11 +17,13 @@ class MToonProfileTest {
 		var profile = RenderedGltfModel.MToonProfile.from(Map.of(
 			"shader", "VRM/MToon",
 			"textureProperties", Map.of("_ShadeTexture", 7),
+			"floatProperties", Map.of("_ShadeShift", 0.0F, "_ShadeToony", 1.0F, "_RimFresnelPower", 3.4F),
 			"vectorProperties", Map.of("_ShadeColor", List.of(0.5F, 0.25F, 1.0F, 1.0F))));
 
 		assertTrue(profile.enabled());
 		assertEquals(7, profile.shadeTextureIndex());
 		assertEquals(ARGB.color(255, 128, 64, 255), profile.shadeTint());
+		assertEquals(238, profile.toonControl());
 	}
 
 	@Test

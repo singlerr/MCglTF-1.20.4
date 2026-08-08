@@ -607,15 +607,19 @@ public class RenderedGltfModel {
 		}
 	}
 
-	static record MToonProfile(boolean enabled, int shadeTextureIndex, int shadeTint) {
-		static final MToonProfile NONE = new MToonProfile(false, -1, 0xFFFFFFFF);
+	static record MToonProfile(boolean enabled, int shadeTextureIndex, int shadeTint, int toonControl) {
+		static final MToonProfile NONE = new MToonProfile(false, -1, 0xFFFFFFFF, 0);
 
 		static MToonProfile from(Object value) {
 			if (!(value instanceof Map<?, ?> material) || !"VRM/MToon".equals(material.get("shader"))) {
 				return NONE;
 			}
 			int textureIndex = integer(mapValue(material, "textureProperties", "_ShadeTexture"), -1);
-			return new MToonProfile(true, textureIndex, tint(mapValue(material, "vectorProperties", "_ShadeColor")));
+			float shadeShift = number(mapValue(material, "floatProperties", "_ShadeShift"), 0.0F);
+			float shadeToony = number(mapValue(material, "floatProperties", "_ShadeToony"), 0.5F);
+			float rimFresnelPower = number(mapValue(material, "floatProperties", "_RimFresnelPower"), 3.0F);
+			return new MToonProfile(true, textureIndex, tint(mapValue(material, "vectorProperties", "_ShadeColor")),
+				toonControl(shadeShift, shadeToony, rimFresnelPower));
 		}
 
 		private static Object mapValue(Map<?, ?> source, String key, String nestedKey) {
@@ -625,6 +629,18 @@ public class RenderedGltfModel {
 
 		private static int integer(Object value, int fallback) {
 			return value instanceof Number number ? number.intValue() : fallback;
+		}
+
+		private static float number(Object value, float fallback) {
+			return value instanceof Number number ? number.floatValue() : fallback;
+		}
+
+		private static int toonControl(float shadeShift, float shadeToony, float rimFresnelPower) {
+			int toony = Math.round(Math.max(0.0F, Math.min(1.0F, shadeToony)) * 7.0F);
+			int shift = Math.round(Math.max(-1.0F, Math.min(1.0F, shadeShift)) * 3.0F) + 3;
+			int rim = rimFresnelPower < 1.5F ? 0 : rimFresnelPower < 3.0F ? 1
+				: rimFresnelPower < 6.0F ? 2 : 3;
+			return (toony << 5) | (shift << 2) | rim;
 		}
 
 		private static int tint(Object value) {
@@ -680,7 +696,7 @@ public class RenderedGltfModel {
 			if (mtoon.enabled()) {
 				TextureModel shadeTexture = mtoon.shadeTextureIndex() >= 0
 					? textures.textureAt(mtoon.shadeTextureIndex()) : baseTexture;
-				Identifier shade = textures.resolve(shadeTexture, policy, mtoon.shadeTint());
+				Identifier shade = textures.resolve(shadeTexture, policy, mtoon.shadeTint(), mtoon.toonControl());
 				renderType = MToonRenderTypes.create(texture, shade, alphaMode == AlphaMode.MASK,
 					alphaMode == AlphaMode.BLEND);
 			} else {
@@ -714,7 +730,11 @@ public class RenderedGltfModel {
 		}
 
 		Identifier resolve(TextureModel texture, AlphaPolicy policy, int tint) {
-			TextureKey key = new TextureKey(texture, policy, tint);
+			return resolve(texture, policy, tint, -1);
+		}
+
+		Identifier resolve(TextureModel texture, AlphaPolicy policy, int tint, int toonControl) {
+			TextureKey key = new TextureKey(texture, policy, tint, toonControl);
 			Identifier existing = textures.get(key);
 			if (existing != null) {
 				return existing;
@@ -725,6 +745,9 @@ public class RenderedGltfModel {
 			NativeImage image = readImage(texture);
 			applyTint(image, tint);
 			applyAlphaPolicy(image, policy);
+			if (toonControl >= 0) {
+				applyToonControl(image, toonControl);
+			}
 			DynamicTexture dynamicTexture = new GltfTexture(identifier::toString, image, texture);
 			textureManager.register(identifier, dynamicTexture);
 			cleanup.add(() -> textureManager.release(identifier));
@@ -750,6 +773,14 @@ public class RenderedGltfModel {
 				NativeImage image = new NativeImage(1, 1, false);
 				image.setPixel(0, 0, 0xFFFF00FF);
 				return image;
+			}
+		}
+
+		private static void applyToonControl(NativeImage image, int control) {
+			for (int y = 0; y < image.getHeight(); y++) {
+				for (int x = 0; x < image.getWidth(); x++) {
+					image.setPixel(x, y, (image.getPixel(x, y) & 0x00FFFFFF) | (control << 24));
+				}
 			}
 		}
 
@@ -803,7 +834,7 @@ public class RenderedGltfModel {
 		}
 	}
 
-	private record TextureKey(TextureModel texture, AlphaPolicy alphaPolicy, int tint) {
+	private record TextureKey(TextureModel texture, AlphaPolicy alphaPolicy, int tint, int toonControl) {
 	}
 
 	private static int[] triangulate(MeshPrimitiveModel primitive, int vertexCount) {

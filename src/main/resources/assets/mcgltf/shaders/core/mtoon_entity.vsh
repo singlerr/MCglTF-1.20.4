@@ -19,13 +19,16 @@ out vec4 vertexColor;
 out vec4 lightMapColor;
 out vec2 texCoord0;
 out vec3 toonNormal;
+out vec3 toonView;
 
 void main() {
-    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+    vec3 viewPosition = (ModelViewMat * vec4(Position, 1.0)).xyz;
+    gl_Position = ProjMat * vec4(viewPosition, 1.0);
     sphericalVertexDistance = fog_spherical_distance(Position);
     cylindricalVertexDistance = fog_cylindrical_distance(Position);
     vertexColor = Color;
     lightMapColor = sample_lightmap(Sampler2, UV2);
     texCoord0 = UV0;
-    toonNormal = normalize(Normal);
+    toonNormal = normalize(mat3(ModelViewMat) * Normal);
+    toonView = normalize(-viewPosition);
 }

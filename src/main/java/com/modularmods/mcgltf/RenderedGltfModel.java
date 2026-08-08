@@ -65,6 +65,8 @@ import net.minecraft.util.LightCoordsUtil;
 public class RenderedGltfModel {
 
 	private static final AtomicInteger NEXT_MODEL_ID = new AtomicInteger();
+	/** Requests the neutral overlay rows that carry a two-bit MToon toony value. */
+	public static final int MTOON_OVERLAY_REQUEST = 15 << 16;
 	public static final RenderView FULL_VIEW = new RenderView(Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
 
 	public final GltfModel gltfModel;
@@ -310,8 +312,9 @@ public class RenderedGltfModel {
 
 			poseStack.pushPose();
 			poseStack.mulPose(nodeTransform);
+			int overlay = material.overlay(packedOverlay);
 			collector.submitCustomGeometry(poseStack, material.renderType(shaderModActive),
-				(pose, consumer) -> render(pose, consumer, light, packedOverlay, geometry, submittedIndices));
+				(pose, consumer) -> render(pose, consumer, light, overlay, geometry, submittedIndices));
 			poseStack.popPose();
 		}
 
@@ -643,6 +646,10 @@ public class RenderedGltfModel {
 			return (toony << 5) | (shift << 2) | rim;
 		}
 
+		int overlay() {
+			return enabled ? Math.round((toonControl >>> 5 & 7) * 3.0F / 7.0F) : 3;
+		}
+
 		private static int tint(Object value) {
 			if (!(value instanceof List<?> color) || color.size() < 3) {
 				return 0xFFFFFFFF;
@@ -656,10 +663,17 @@ public class RenderedGltfModel {
 	}
 
 	private record PreparedMaterial(Identifier texture, RenderType renderType, RenderType shaderRenderType,
-		float[] colorFactor, boolean unlit,
+		float[] colorFactor, boolean unlit, int mtoonOverlay,
 		int texCoordSet) {
 		RenderType renderType(boolean shaderModActive) {
 			return shaderModActive ? shaderRenderType : renderType;
+		}
+
+		int overlay(int requested) {
+			if (requested != MTOON_OVERLAY_REQUEST) {
+				return requested;
+			}
+			return (12 + mtoonOverlay) << 16;
 		}
 
 		static PreparedMaterial create(MaterialModel source, TextureRegistry textures, MToonProfile mtoon) {
@@ -702,7 +716,8 @@ public class RenderedGltfModel {
 			} else {
 				renderType = shaderRenderType;
 			}
-			return new PreparedMaterial(texture, renderType, shaderRenderType, colorFactor, unlit, texCoordSet);
+			return new PreparedMaterial(texture, renderType, shaderRenderType, colorFactor, unlit,
+				mtoon.overlay(), texCoordSet);
 		}
 	}
 

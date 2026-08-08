@@ -51,8 +51,12 @@ advanced callers that need to inspect the parsed glTF before sharing a rendered 
 - [x] VRM 0.x MToon base/shade textures with per-material shift/toony ramp and rim
 
 MToon uses a dedicated managed Blaze3D entity pass when ShaderPacks are off: the VRM 0.x `VRM.materialProperties` base
-and shade textures are mixed at the material's `_ShadeShift`/`_ShadeToony` light boundary with a small parameter rim. The controls travel in the generated shade texture alpha, which the managed pass restores before writing opacity. When Iris has an active ShaderPack, MCglTF selects its
-standard entity pass instead, allowing the pack's G-buffer contract and Celerant's marker-only toon patch to apply.
+and shade textures are mixed at the material's `_ShadeShift`/`_ShadeToony` light boundary with a small parameter rim.
+The controls travel in the generated shade texture alpha, which the managed pass restores before writing opacity.
+When Iris has an active ShaderPack, MCglTF selects its standard entity pass instead. Callers may submit
+`RenderedGltfModel.MTOON_OVERLAY_REQUEST` as the packed overlay to carry a neutral, two-bit per-material `_ShadeToony`
+signal for a compatible entity-shader patch while preserving the pack's G-buffer contract. Without such a patch the
+reserved overlay samples white, so the model retains ordinary entity rendering.
 This avoids mutating ShaderPack source or global OpenGL state. Genshin-specific
 LightMap channels, face SDFs, depth rims, and inverted-hull outlines are not VRM interchange formats, so they remain
 model/renderer-specific rather than being guessed from arbitrary textures. Metallic-roughness and normal maps remain

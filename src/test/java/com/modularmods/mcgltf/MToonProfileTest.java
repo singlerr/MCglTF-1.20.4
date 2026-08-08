@@ -24,6 +24,7 @@ class MToonProfileTest {
 		assertEquals(7, profile.shadeTextureIndex());
 		assertEquals(ARGB.color(255, 128, 64, 255), profile.shadeTint());
 		assertEquals(238, profile.toonControl());
+		assertEquals(3, profile.overlay());
 	}
 
 	@Test

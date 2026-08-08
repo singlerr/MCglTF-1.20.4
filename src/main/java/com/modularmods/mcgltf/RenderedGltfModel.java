@@ -310,7 +310,7 @@ public class RenderedGltfModel {
 
 			poseStack.pushPose();
 			poseStack.mulPose(nodeTransform);
-			collector.submitCustomGeometry(poseStack, material.renderType(),
+			collector.submitCustomGeometry(poseStack, material.renderType(shaderModActive),
 				(pose, consumer) -> render(pose, consumer, light, packedOverlay, geometry, submittedIndices));
 			poseStack.popPose();
 		}
@@ -639,8 +639,13 @@ public class RenderedGltfModel {
 		}
 	}
 
-	private record PreparedMaterial(Identifier texture, RenderType renderType, float[] colorFactor, boolean unlit,
+	private record PreparedMaterial(Identifier texture, RenderType renderType, RenderType shaderRenderType,
+		float[] colorFactor, boolean unlit,
 		int texCoordSet) {
+		RenderType renderType(boolean shaderModActive) {
+			return shaderModActive ? shaderRenderType : renderType;
+		}
+
 		static PreparedMaterial create(MaterialModel source, TextureRegistry textures, MToonProfile mtoon) {
 			TextureModel baseTexture = null;
 			float[] colorFactor = new float[] {1.0F, 1.0F, 1.0F, 1.0F};
@@ -666,6 +671,11 @@ public class RenderedGltfModel {
 				case BLEND -> AlphaPolicy.NONE;
 			};
 			Identifier texture = textures.resolve(baseTexture, policy);
+			RenderType shaderRenderType = switch (alphaMode) {
+				case OPAQUE -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entitySolid(texture);
+				case MASK -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entityCutoutCull(texture);
+				case BLEND -> RenderTypes.entityTranslucent(texture);
+			};
 			RenderType renderType;
 			if (mtoon.enabled()) {
 				TextureModel shadeTexture = mtoon.shadeTextureIndex() >= 0
@@ -674,13 +684,9 @@ public class RenderedGltfModel {
 				renderType = MToonRenderTypes.create(texture, shade, alphaMode == AlphaMode.MASK,
 					alphaMode == AlphaMode.BLEND);
 			} else {
-				renderType = switch (alphaMode) {
-					case OPAQUE -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entitySolid(texture);
-					case MASK -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entityCutoutCull(texture);
-					case BLEND -> RenderTypes.entityTranslucent(texture);
-				};
+				renderType = shaderRenderType;
 			}
-			return new PreparedMaterial(texture, renderType, colorFactor, unlit, texCoordSet);
+			return new PreparedMaterial(texture, renderType, shaderRenderType, colorFactor, unlit, texCoordSet);
 		}
 	}
 

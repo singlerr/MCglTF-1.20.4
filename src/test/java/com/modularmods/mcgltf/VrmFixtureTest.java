@@ -57,6 +57,8 @@ class VrmFixtureTest {
 			.filter(MaterialModelV2.class::isInstance).map(MaterialModelV2.class::cast)
 			.filter(material -> material.getAlphaMode() == AlphaMode.MASK).count());
 		assertTrue(model.getExtensionsModel().getExtensionsUsed().stream().anyMatch(extension -> extension.startsWith("VRM")));
+		assertTrue(RenderedGltfModel.mtoonMaterials(model).size() > 0,
+			"VRM MToon materialProperties were not associated with glTF materials");
 
 		for (var image : model.getImageModels()) {
 			ByteBuffer data = image.getImageData().duplicate();

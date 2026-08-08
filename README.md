@@ -48,9 +48,13 @@ advanced callers that need to inspect the parsed glTF before sharing a rendered 
 - [x] Zero-scale node culling
 - [x] Opaque-first stable batching and cached CPU deformation
 - [x] Vanilla and Iris-compatible first-/third-person submission
+- [x] VRM 0.x MToon base/shade textures with a stepped normal-light ramp
 
-Metallic-roughness, normal maps, and VRM MToon-specific shading are intentionally left to the active Minecraft/Iris
-shader pipeline; MCglTF does not install or mutate global shader/OpenGL state.
+MToon uses a dedicated managed Blaze3D entity pass: the VRM 0.x `VRM.materialProperties` base and shade textures are
+mixed at the material's light boundary. This avoids mutating ShaderPack source or global OpenGL state. Genshin-specific
+LightMap channels, face SDFs, depth rims, and inverted-hull outlines are not VRM interchange formats, so they remain
+model/renderer-specific rather than being guessed from arbitrary textures. Metallic-roughness and normal maps remain
+the responsibility of the active Minecraft/Iris pipeline.
 
 ## Tests
 

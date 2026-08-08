@@ -76,13 +76,14 @@ public class RenderedGltfModel {
 			this.renderedGltfScenes = List.of();
 			return;
 		}
-		TextureRegistry textures = new TextureRegistry(cleanup, NEXT_MODEL_ID.getAndIncrement());
+		TextureRegistry textures = new TextureRegistry(cleanup, NEXT_MODEL_ID.getAndIncrement(), gltfModel);
+		Map<MaterialModel, MToonProfile> mtoonMaterials = mtoonMaterials(gltfModel);
 		List<RenderedGltfScene> scenes = new ArrayList<>(gltfModel.getSceneModels().size());
 		for (SceneModel sceneModel : gltfModel.getSceneModels()) {
 			List<Primitive> primitives = new ArrayList<>();
 			IdentityHashMap<NodeModel, Boolean> visited = new IdentityHashMap<>();
 			for (NodeModel nodeModel : sceneModel.getNodeModels()) {
-				collectPrimitives(nodeModel, textures, primitives, visited);
+				collectPrimitives(nodeModel, textures, mtoonMaterials, primitives, visited);
 			}
 			primitives.sort(Comparator.comparingInt(Primitive::sortOrder)
 				.thenComparing(primitive -> primitive.sortOrder() == 0 ? primitive.textureKey() : ""));
@@ -117,22 +118,41 @@ public class RenderedGltfModel {
 		}
 	}
 
-	private static void collectPrimitives(NodeModel node, TextureRegistry textures, List<Primitive> output,
+	private static void collectPrimitives(NodeModel node, TextureRegistry textures,
+		Map<MaterialModel, MToonProfile> mtoonMaterials, List<Primitive> output,
 		IdentityHashMap<NodeModel, Boolean> visited) {
 		if (visited.put(node, Boolean.TRUE) != null) {
 			return;
 		}
 		for (MeshModel mesh : node.getMeshModels()) {
 			for (MeshPrimitiveModel primitive : mesh.getMeshPrimitiveModels()) {
-				Primitive prepared = Primitive.create(node, mesh, primitive, textures);
+				Primitive prepared = Primitive.create(node, mesh, primitive, textures,
+					mtoonMaterials.getOrDefault(primitive.getMaterialModel(), MToonProfile.NONE));
 				if (prepared != null) {
 					output.add(prepared);
 				}
 			}
 		}
 		for (NodeModel child : node.getChildren()) {
-			collectPrimitives(child, textures, output, visited);
+			collectPrimitives(child, textures, mtoonMaterials, output, visited);
 		}
+	}
+
+	static Map<MaterialModel, MToonProfile> mtoonMaterials(GltfModel gltfModel) {
+		Map<String, Object> extensions = gltfModel.getExtensions();
+		if (extensions == null || !(extensions.get("VRM") instanceof Map<?, ?> vrm)
+			|| !(vrm.get("materialProperties") instanceof List<?> properties)) {
+			return Map.of();
+		}
+		Map<MaterialModel, MToonProfile> result = new IdentityHashMap<>();
+		List<MaterialModel> materials = gltfModel.getMaterialModels();
+		for (int i = 0; i < Math.min(materials.size(), properties.size()); i++) {
+			MToonProfile profile = MToonProfile.from(properties.get(i));
+			if (profile.enabled()) {
+				result.put(materials.get(i), profile);
+			}
+		}
+		return result;
 	}
 
 	static int[] filterTriangles(int[] indices, boolean[] hiddenVertices) {
@@ -230,7 +250,8 @@ public class RenderedGltfModel {
 			this.material = material;
 		}
 
-		static Primitive create(NodeModel node, MeshModel mesh, MeshPrimitiveModel source, TextureRegistry textures) {
+		static Primitive create(NodeModel node, MeshModel mesh, MeshPrimitiveModel source, TextureRegistry textures,
+			MToonProfile mtoon) {
 			AccessorModel positionAccessor = source.getAttributes().get("POSITION");
 			if (positionAccessor == null || positionAccessor.getCount() == 0) {
 				return null;
@@ -246,7 +267,7 @@ public class RenderedGltfModel {
 			float[] positions = readVectors(positionAccessor, vertexCount, 3, 0.0F);
 			float[] normals = attributes.containsKey("NORMAL")
 				? readVectors(attributes.get("NORMAL"), vertexCount, 3, 0.0F) : null;
-			PreparedMaterial material = PreparedMaterial.create(source.getMaterialModel(), textures);
+			PreparedMaterial material = PreparedMaterial.create(source.getMaterialModel(), textures, mtoon);
 			AccessorModel texcoordAccessor = attributes.get("TEXCOORD_" + material.texCoordSet());
 			float[] texcoords = texcoordAccessor == null
 				? new float[vertexCount * 2] : readVectors(texcoordAccessor, vertexCount, 2, 0.0F);
@@ -586,9 +607,41 @@ public class RenderedGltfModel {
 		}
 	}
 
+	static record MToonProfile(boolean enabled, int shadeTextureIndex, int shadeTint) {
+		static final MToonProfile NONE = new MToonProfile(false, -1, 0xFFFFFFFF);
+
+		static MToonProfile from(Object value) {
+			if (!(value instanceof Map<?, ?> material) || !"VRM/MToon".equals(material.get("shader"))) {
+				return NONE;
+			}
+			int textureIndex = integer(mapValue(material, "textureProperties", "_ShadeTexture"), -1);
+			return new MToonProfile(true, textureIndex, tint(mapValue(material, "vectorProperties", "_ShadeColor")));
+		}
+
+		private static Object mapValue(Map<?, ?> source, String key, String nestedKey) {
+			Object nested = source.get(key);
+			return nested instanceof Map<?, ?> map ? map.get(nestedKey) : null;
+		}
+
+		private static int integer(Object value, int fallback) {
+			return value instanceof Number number ? number.intValue() : fallback;
+		}
+
+		private static int tint(Object value) {
+			if (!(value instanceof List<?> color) || color.size() < 3) {
+				return 0xFFFFFFFF;
+			}
+			return ARGB.color(255, channel(color.get(0)), channel(color.get(1)), channel(color.get(2)));
+		}
+
+		private static int channel(Object value) {
+			return value instanceof Number number ? Math.max(0, Math.min(255, Math.round(number.floatValue() * 255.0F))) : 255;
+		}
+	}
+
 	private record PreparedMaterial(Identifier texture, RenderType renderType, float[] colorFactor, boolean unlit,
 		int texCoordSet) {
-		static PreparedMaterial create(MaterialModel source, TextureRegistry textures) {
+		static PreparedMaterial create(MaterialModel source, TextureRegistry textures, MToonProfile mtoon) {
 			TextureModel baseTexture = null;
 			float[] colorFactor = new float[] {1.0F, 1.0F, 1.0F, 1.0F};
 			AlphaMode alphaMode = AlphaMode.OPAQUE;
@@ -614,11 +667,19 @@ public class RenderedGltfModel {
 			};
 			Identifier texture = textures.resolve(baseTexture, policy);
 			RenderType renderType;
-			renderType = switch (alphaMode) {
-				case OPAQUE -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entitySolid(texture);
-				case MASK -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entityCutoutCull(texture);
-				case BLEND -> RenderTypes.entityTranslucent(texture);
-			};
+			if (mtoon.enabled()) {
+				TextureModel shadeTexture = mtoon.shadeTextureIndex() >= 0
+					? textures.textureAt(mtoon.shadeTextureIndex()) : baseTexture;
+				Identifier shade = textures.resolve(shadeTexture, policy, mtoon.shadeTint());
+				renderType = MToonRenderTypes.create(texture, shade, alphaMode == AlphaMode.MASK,
+					alphaMode == AlphaMode.BLEND);
+			} else {
+				renderType = switch (alphaMode) {
+					case OPAQUE -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entitySolid(texture);
+					case MASK -> doubleSided ? RenderTypes.entityCutout(texture) : RenderTypes.entityCutoutCull(texture);
+					case BLEND -> RenderTypes.entityTranslucent(texture);
+				};
+			}
 			return new PreparedMaterial(texture, renderType, colorFactor, unlit, texCoordSet);
 		}
 	}
@@ -632,16 +693,22 @@ public class RenderedGltfModel {
 		private final List<Runnable> cleanup;
 		private final int modelId;
 		private final TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+		private final List<TextureModel> sourceTextures;
 		private final Map<TextureKey, Identifier> textures = new HashMap<>();
 		private int nextTextureId;
 
-		TextureRegistry(List<Runnable> cleanup, int modelId) {
+		TextureRegistry(List<Runnable> cleanup, int modelId, GltfModel gltfModel) {
 			this.cleanup = cleanup;
 			this.modelId = modelId;
+			this.sourceTextures = gltfModel.getTextureModels();
 		}
 
 		Identifier resolve(TextureModel texture, AlphaPolicy policy) {
-			TextureKey key = new TextureKey(texture, policy);
+			return resolve(texture, policy, 0xFFFFFFFF);
+		}
+
+		Identifier resolve(TextureModel texture, AlphaPolicy policy, int tint) {
+			TextureKey key = new TextureKey(texture, policy, tint);
 			Identifier existing = textures.get(key);
 			if (existing != null) {
 				return existing;
@@ -650,12 +717,17 @@ public class RenderedGltfModel {
 			Identifier identifier = Identifier.fromNamespaceAndPath(MCglTF.MODID,
 				"generated/" + modelId + "/texture_" + nextTextureId++ + ".png");
 			NativeImage image = readImage(texture);
+			applyTint(image, tint);
 			applyAlphaPolicy(image, policy);
 			DynamicTexture dynamicTexture = new GltfTexture(identifier::toString, image, texture);
 			textureManager.register(identifier, dynamicTexture);
 			cleanup.add(() -> textureManager.release(identifier));
 			textures.put(key, identifier);
 			return identifier;
+		}
+
+		TextureModel textureAt(int index) {
+			return index >= 0 && index < sourceTextures.size() ? sourceTextures.get(index) : null;
 		}
 
 		private static NativeImage readImage(TextureModel texture) {
@@ -687,6 +759,21 @@ public class RenderedGltfModel {
 				}
 			}
 		}
+
+		private static void applyTint(NativeImage image, int tint) {
+			if (tint == 0xFFFFFFFF) {
+				return;
+			}
+			for (int y = 0; y < image.getHeight(); y++) {
+				for (int x = 0; x < image.getWidth(); x++) {
+					int pixel = image.getPixel(x, y);
+					image.setPixel(x, y, ARGB.color(ARGB.alpha(pixel),
+						ARGB.red(pixel) * ARGB.red(tint) / 255,
+						ARGB.green(pixel) * ARGB.green(tint) / 255,
+						ARGB.blue(pixel) * ARGB.blue(tint) / 255));
+				}
+			}
+		}
 	}
 
 	private static final class GltfTexture extends DynamicTexture {
@@ -710,7 +797,7 @@ public class RenderedGltfModel {
 		}
 	}
 
-	private record TextureKey(TextureModel texture, AlphaPolicy alphaPolicy) {
+	private record TextureKey(TextureModel texture, AlphaPolicy alphaPolicy, int tint) {
 	}
 
 	private static int[] triangulate(MeshPrimitiveModel primitive, int vertexCount) {

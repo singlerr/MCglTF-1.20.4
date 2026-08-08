@@ -55,6 +55,7 @@ public final class MCglTF implements ClientModInitializer {
 			return;
 		}
 		initialized = true;
+		MToonRenderTypes.bootstrap();
 		shaderModActive = createShaderModProbe();
 		ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(
 			Identifier.fromNamespaceAndPath(MODID, "gltf_reload_listener"),

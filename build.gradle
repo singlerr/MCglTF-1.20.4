@@ -74,7 +74,7 @@ def generatedGameTestResources = layout.buildDirectory.dir("generated/gametest/r
 
 tasks.register("prepareGameTestModels", Sync) {
     from("test_models") {
-        include "*.vrm"
+        include "*.vrm", "*.vrm.toon.json", "*-toon-*.png"
     }
     into(generatedGameTestResources.map { it.dir("assets/mcgltf-gametest/models") })
 }

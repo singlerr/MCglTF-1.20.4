@@ -5,7 +5,6 @@
 #moj_import <minecraft:light.glsl>
 
 uniform sampler2D Sampler0;
-uniform sampler2D Sampler1;
 
 in float sphericalVertexDistance;
 in float cylindricalVertexDistance;
@@ -24,7 +23,7 @@ void main() {
         discard;
     }
 #endif
-    vec4 shade = texture(Sampler1, texCoord0);
+    vec4 shade = texture(Sampler0, texCoord0 + vec2(0.0, 0.5));
     float toonControl = floor(shade.a * 255.0 + 0.5);
     float toony = floor(toonControl / 32.0) / 7.0;
     float shift = clamp((floor(mod(toonControl, 32.0) / 4.0) - 3.0) / 3.0, -1.0, 1.0);

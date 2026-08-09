@@ -49,18 +49,52 @@ advanced callers that need to inspect the parsed glTF before sharing a rendered 
 - [x] Opaque-first stable batching and cached CPU deformation
 - [x] Vanilla and Iris-compatible first-/third-person submission
 - [x] VRM 0.x MToon base/shade textures with per-material shift/toony ramp and rim
+- [x] Angle-limited smooth MToon normals and standard-entity inverted-hull outlines
+- [x] Optional ToonShader materials with LightMap ramps, face SDF, head axes, depth rim, material outlines, matcap/specular, emission, blush, and day/night ramps
 
 MToon uses a dedicated managed Blaze3D entity pass when ShaderPacks are off: the VRM 0.x `VRM.materialProperties` base
 and shade textures are mixed at the material's `_ShadeShift`/`_ShadeToony` light boundary with a small parameter rim.
 The controls travel in the generated shade texture alpha, which the managed pass restores before writing opacity.
-When Iris has an active ShaderPack, MCglTF selects its standard entity pass instead. Callers may submit
-`RenderedGltfModel.MTOON_OVERLAY_REQUEST` as the packed overlay to carry a neutral, two-bit per-material `_ShadeToony`
-signal for a compatible entity-shader patch while preserving the pack's G-buffer contract. Without such a patch the
-reserved overlay samples white, so the model retains ordinary entity rendering.
-This avoids mutating ShaderPack source or global OpenGL state. Genshin-specific
-LightMap channels, face SDFs, depth rims, and inverted-hull outlines are not VRM interchange formats, so they remain
-model/renderer-specific rather than being guessed from arbitrary textures. Metallic-roughness and normal maps remain
-the responsibility of the active Minecraft/Iris pipeline.
+When Iris has an active ShaderPack, ordinary MCglTF callers still use its standard entity pass and never enter the
+ToonShader renderer. ToonShader is opt-in: construct `RenderedGltfModel` with a sidecar path, submit
+`RenderedGltfModel.MTOON_OVERLAY_REQUEST`, capture the world projection with `ToonShader.captureProjection`, and call
+`ToonShader.renderFrame()` after Iris finishes its final pass. The optional renderer then composites only those model
+primitives against copied scene color/depth; it does not transform ShaderPack GLSL or write unknown G-buffer attachments.
+
+### Optional ToonShader sidecar
+
+The sidecar is JSON version 1 and normally sits beside the model as `model.vrm.toon.json`. PNG paths are relative to
+that file and must stay in the same directory tree. Invalid material/node references, traversal, non-PNG textures,
+profiles over 1 MiB, or textures over 64 MiB fail model preparation instead of guessing.
+
+```json
+{
+  "version": 1,
+  "head": {"name": "Head", "forward": [0, 0, -1], "right": [1, 0, 0]},
+  "lightDirectionMultiplier": [1, 0.55, 1],
+  "rampTexture": "avatar-ramp.png",
+  "materials": [{
+    "index": 2,
+    "face": true,
+    "faceMap": "avatar-face-sdf.png",
+    "lightMap": "avatar-lightmap.png",
+    "outline": true,
+    "outlineMode": "screen",
+    "outlineWidth": 0.35,
+    "rimIntensity": 0.3
+  }]
+}
+```
+
+Material entries accept `index` or an unambiguous `name`. Texture inputs are `shadeTexture`, `normalTexture`,
+`emissionTexture`, `matcapTexture`, `rimTexture`, `outlineWidthTexture`, `lightMap`, and `faceMap`. Controls are
+`materialType`, `face`, `metallic`, `outline`, `outlineMode`, `outlineVertexAlpha`, `backUv`, `shadowOffset`,
+`shadowSmoothness`, `nonMetalSpecular`, `metalSpecular`, `specularShininess`, `emissionIntensity`, `rimOffset`,
+`rimThreshold`, `rimIntensity`, `rimPower`, `outlineWidth`, `outlineDistanceNear`, `outlineDistanceFar`,
+`outlineScaleNear`, `outlineScaleFar`, `outlineZOffset`, `outlineLightingMix`, `faceShadowStrength`,
+`faceShadowOffset`, `blushIntensity`, `shadeColor`, `emissionColor`, `rimColor`, `outlineColor`, five-entry
+`outlineColors`, `blushColor`, and `[baseX, baseY, outlineX, outlineY]` `screenOffset`. Missing nonstandard inputs use
+neutral textures; they are never inferred from unrelated model channels.
 
 ## Tests
 

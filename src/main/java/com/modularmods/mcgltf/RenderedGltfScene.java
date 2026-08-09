@@ -10,12 +10,14 @@ import net.minecraft.client.renderer.SubmitNodeCollector;
 public final class RenderedGltfScene {
 
 	private final List<RenderedGltfModel.Primitive> primitives;
+	private final ToonShaderModel toonShader;
 	private final RenderedGltfModel.FrameSnapshots frameSnapshots = new RenderedGltfModel.FrameSnapshots();
 	private long snapshotFrameTime = Long.MIN_VALUE;
 	private boolean shaderModActive;
 
-	RenderedGltfScene(List<RenderedGltfModel.Primitive> primitives) {
+	RenderedGltfScene(List<RenderedGltfModel.Primitive> primitives, ToonShaderModel toonShader) {
 		this.primitives = List.copyOf(primitives);
+		this.toonShader = toonShader;
 	}
 
 	public void submit(PoseStack poseStack, SubmitNodeCollector collector, int packedLight, int packedOverlay) {
@@ -32,8 +34,11 @@ public final class RenderedGltfScene {
 			frameSnapshots.clear();
 			shaderModActive = MCglTF.getInstance().isShaderModActive();
 		}
+		ToonShaderModel.Frame toonFrame = shaderModActive && packedOverlay == RenderedGltfModel.MTOON_OVERLAY_REQUEST
+			? toonShader.frame(poseStack, frameSnapshots) : null;
 		for (RenderedGltfModel.Primitive primitive : primitives) {
-			primitive.submit(poseStack, collector, packedLight, packedOverlay, frameSnapshots, shaderModActive, view);
+			primitive.submit(poseStack, collector, packedLight, packedOverlay, frameSnapshots, shaderModActive,
+				toonFrame, view);
 		}
 	}
 

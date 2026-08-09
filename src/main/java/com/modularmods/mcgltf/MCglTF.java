@@ -193,16 +193,21 @@ public final class MCglTF implements ClientModInitializer {
 		if (!FabricLoader.getInstance().isModLoaded("iris")) {
 			return () -> false;
 		}
-		return () -> {
-			try {
-				Class<?> irisApi = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
-				Object api = irisApi.getMethod("getInstance").invoke(null);
-				return (boolean) irisApi.getMethod("isShaderPackInUse").invoke(api);
-			} catch (ReflectiveOperationException exception) {
-				logger.debug("Could not query Iris shader state", exception);
-				return false;
-			}
-		};
+		try {
+			Class<?> irisApi = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+			Object api = irisApi.getMethod("getInstance").invoke(null);
+			var query = irisApi.getMethod("isShaderPackInUse");
+			return () -> {
+				try {
+					return (boolean) query.invoke(api);
+				} catch (ReflectiveOperationException exception) {
+					return false;
+				}
+			};
+		} catch (ReflectiveOperationException exception) {
+			logger.debug("Could not initialize the Iris shader-state probe", exception);
+			return () -> false;
+		}
 	}
 
 	public static MCglTF getInstance() {

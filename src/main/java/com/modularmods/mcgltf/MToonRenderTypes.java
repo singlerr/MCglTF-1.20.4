@@ -4,7 +4,6 @@ import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 
-import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
@@ -22,11 +21,10 @@ final class MToonRenderTypes {
 		// Forces registration before Minecraft loads its shader resources.
 	}
 
-	static RenderType create(Identifier texture, Identifier shadeTexture, boolean cutout, boolean translucent) {
+	static RenderType create(Identifier texture, boolean cutout, boolean translucent) {
 		RenderPipeline pipeline = translucent ? TRANSLUCENT : cutout ? CUTOUT : SOLID;
 		RenderSetup.RenderSetupBuilder setup = RenderSetup.builder(pipeline)
 			.withTexture("Sampler0", texture)
-			.withTexture("Sampler1", shadeTexture)
 			.useLightmap();
 		if (translucent) {
 			setup.sortOnUpload();
@@ -39,7 +37,6 @@ final class MToonRenderTypes {
 			.withLocation(Identifier.fromNamespaceAndPath(MCglTF.MODID, "pipeline/" + name))
 			.withVertexShader(Identifier.fromNamespaceAndPath(MCglTF.MODID, "core/mtoon_entity"))
 			.withFragmentShader(Identifier.fromNamespaceAndPath(MCglTF.MODID, "core/mtoon_entity"))
-			.withBindGroupLayout(BindGroupLayouts.SAMPLER1)
 			.withCull(false);
 		if (cutout) {
 			builder.withShaderDefine("ALPHA_CUTOUT", 0.1F);

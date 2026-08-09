@@ -24,6 +24,7 @@ class ToonShaderResourceTest {
 			String shader = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
 			assertTrue(shader.contains("vec3 position = Position;"));
 			assertTrue(shader.contains("vec3 normal = normalize(Normal);"));
+			assertTrue(shader.contains("2.0 * outlineWidth(position.z)"));
 		}
 	}
 }

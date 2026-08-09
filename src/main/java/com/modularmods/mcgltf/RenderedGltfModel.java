@@ -735,11 +735,11 @@ public class RenderedGltfModel {
 		int rimTextureIndex, int outlineWidthTextureIndex, Vector4f shadeColor, Vector4f emissionColor,
 		Vector4f rimColor, Vector4f outlineColor, float rimLightingMix, float rimFresnelPower, float rimLift,
 		boolean outline, boolean outlineScreenSpace, float outlineWidth, float outlineDistanceFar,
-		float outlineLightingMix) {
+		float outlineLightingMix, boolean outlineDistanceFade) {
 		static final MToonProfile NONE = new MToonProfile(false, -1, 0xFFFFFFFF, 0,
 			0.0F, 0.9F, 0.0F, -1, -1, -1, -1, -1, new Vector4f(1.0F), new Vector4f(), new Vector4f(),
 			new Vector4f(0.1F, 0.08F, 0.12F, 1.0F), 0.0F, 3.0F, 0.0F, false, false,
-			0.0F, 1.0F, 1.0F);
+			0.0F, 1.0F, 1.0F, false);
 
 		static MToonProfile from(Object value) {
 			if (!(value instanceof Map<?, ?> material) || !"VRM/MToon".equals(material.get("shader"))) {
@@ -767,7 +767,7 @@ public class RenderedGltfModel {
 				number(mapValue(material, "floatProperties", "_RimLift"), 0.0F), outlineMode != 0,
 				outlineMode == 2, number(mapValue(material, "floatProperties", "_OutlineWidth"), 0.0F),
 				number(mapValue(material, "floatProperties", "_OutlineScaledMaxDistance"), 1.0F),
-				number(mapValue(material, "floatProperties", "_OutlineLightingMix"), 1.0F));
+				number(mapValue(material, "floatProperties", "_OutlineLightingMix"), 1.0F), true);
 		}
 
 		static MToonProfile fromVrm1(Map<?, ?> material) {
@@ -786,8 +786,8 @@ public class RenderedGltfModel {
 				color(material.get("outlineColorFactor"), new Vector4f(0.1F, 0.08F, 0.12F, 1.0F)),
 				number(material.get("rimLightingMixFactor"), 0.0F), rimFresnelPower,
 				number(material.get("parametricRimLiftFactor"), 0.0F), !"none".equals(outlineMode),
-				"screenCoordinates".equals(outlineMode), number(material.get("outlineWidthFactor"), 0.0F),
-				1.0F, number(material.get("outlineLightingMixFactor"), 1.0F));
+				"screenCoordinates".equals(outlineMode), number(material.get("outlineWidthFactor"), 0.0F) * 100.0F,
+				1.0F, number(material.get("outlineLightingMixFactor"), 1.0F), false);
 		}
 
 		private static Object mapValue(Map<?, ?> source, String key, String nestedKey) {

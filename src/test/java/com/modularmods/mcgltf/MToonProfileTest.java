@@ -86,6 +86,7 @@ class MToonProfileTest {
 		assertEquals(3, profile.shadeTextureIndex());
 		assertTrue(profile.outline());
 		assertTrue(profile.outlineScreenSpace());
-		assertEquals(0.25F, profile.outlineWidth());
+		assertEquals(25.0F, profile.outlineWidth());
+		assertFalse(profile.outlineDistanceFade());
 	}
 }

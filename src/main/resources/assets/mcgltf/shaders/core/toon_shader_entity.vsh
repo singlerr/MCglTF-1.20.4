@@ -73,10 +73,15 @@ void main() {
     }
     vec3 viewDirection = length(position) > 0.0001 ? normalize(position) : vec3(0.0, 0.0, -1.0);
     position += 0.01 * OutlineParams.y * viewDirection;
-    position += outlineWidth(position.z) * outlineNormal;
+    if (Flags.y < 0.5) {
+        position += outlineWidth(position.z) * outlineNormal;
+    }
 #endif
     gl_Position = ToonProjectionMatrix * vec4(position, 1.0);
 #ifdef TOON_SHADER_OUTLINE
+    if (Flags.y > 0.5) {
+        gl_Position.xy += 2.0 * outlineWidth(position.z) * outlineNormal.xy * gl_Position.w;
+    }
     gl_Position.xy += ScreenOffset.zw * gl_Position.w;
 #else
     gl_Position.xy += ScreenOffset.xy * gl_Position.w;

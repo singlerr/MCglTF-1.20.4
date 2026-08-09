@@ -94,7 +94,9 @@ Material entries accept `index` or an unambiguous `name`. Texture inputs are `sh
 `outlineScaleNear`, `outlineScaleFar`, `outlineZOffset`, `outlineLightingMix`, `faceShadowStrength`,
 `faceShadowOffset`, `blushIntensity`, `shadeColor`, `emissionColor`, `rimColor`, `outlineColor`, five-entry
 `outlineColors`, `blushColor`, and `[baseX, baseY, outlineX, outlineY]` `screenOffset`. Missing nonstandard inputs use
-neutral textures; they are never inferred from unrelated model channels.
+neutral textures; they are never inferred from unrelated model channels. `outlineWidth` is a percentage of screen
+height in `screen` mode and centimeters in `world` mode; VRM 1.0 factors are converted to those units without adding
+distance fade that the material did not request.
 
 ## Tests
 

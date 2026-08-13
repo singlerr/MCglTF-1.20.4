@@ -138,14 +138,17 @@ public class RenderedGltfModel {
 			return;
 		}
 		for (MeshModel mesh : node.getMeshModels()) {
+			List<Primitive> meshPrimitives = new ArrayList<>();
 			for (MeshPrimitiveModel primitive : mesh.getMeshPrimitiveModels()) {
 				Primitive prepared = Primitive.create(node, mesh, primitive, textures,
 					mtoonMaterials.getOrDefault(primitive.getMaterialModel(), MToonProfile.NONE),
 					toonShader);
 				if (prepared != null) {
-					output.add(prepared);
+					meshPrimitives.add(prepared);
 				}
 			}
+			Primitive.smoothGeneratedNormals(meshPrimitives, toonShader.smoothNormalCosine());
+			output.addAll(meshPrimitives);
 		}
 		for (NodeModel child : node.getChildren()) {
 			collectPrimitives(child, textures, mtoonMaterials, toonShader, output, visited);
@@ -231,8 +234,11 @@ public class RenderedGltfModel {
 		private final float[] texcoords;
 		private final float[] backTexcoords;
 		private final int[] vertexColors;
+		private final int[] toonVertexColors;
 		private final float[][] morphPositions;
 		private final float[][] morphNormals;
+		private ToonShaderGeometry toonGeometry;
+		private final boolean generatedSmoothNormals;
 		private final int influences;
 		private final int[] joints;
 		private final float[] weights;
@@ -245,7 +251,9 @@ public class RenderedGltfModel {
 		private Primitive(NodeModel node, MeshModel mesh, SkinModel skin, int vertexCount, int[] indices,
 			float[] positions, float[] normals, float[] texcoords, float[] backTexcoords, float[] colors,
 			float[][] morphPositions,
-			float[][] morphNormals, int influences, int[] joints, float[] weights, PreparedMaterial material) {
+			float[][] morphNormals, ToonShaderGeometry toonGeometry, boolean generatedSmoothNormals,
+			int influences, int[] joints, float[] weights,
+			PreparedMaterial material) {
 			this.node = node;
 			this.mesh = mesh;
 			this.skin = skin;
@@ -256,8 +264,11 @@ public class RenderedGltfModel {
 			this.texcoords = texcoords;
 			this.backTexcoords = backTexcoords;
 			this.vertexColors = new int[vertexCount];
+			this.toonVertexColors = new int[vertexCount];
 			for (int vertex = 0; vertex < vertexCount; vertex++) {
 				int color = vertex * 4;
+				toonVertexColors[vertex] = ARGB.color(toChannel(colors[color + 3]), toChannel(colors[color]),
+					toChannel(colors[color + 1]), toChannel(colors[color + 2]));
 				vertexColors[vertex] = ARGB.color(
 					toChannel(colors[color + 3] * material.colorFactor()[3]),
 					toChannel(colors[color] * material.colorFactor()[0]),
@@ -266,6 +277,8 @@ public class RenderedGltfModel {
 			}
 			this.morphPositions = morphPositions;
 			this.morphNormals = morphNormals;
+			this.toonGeometry = toonGeometry;
+			this.generatedSmoothNormals = generatedSmoothNormals;
 			this.influences = influences;
 			this.joints = joints;
 			this.weights = weights;
@@ -289,14 +302,7 @@ public class RenderedGltfModel {
 			float[] positions = readVectors(positionAccessor, vertexCount, 3, 0.0F);
 			float[] normals = attributes.containsKey("NORMAL")
 				? readVectors(attributes.get("NORMAL"), vertexCount, 3, 0.0F) : null;
-			if (toonShader.applies(source.getMaterialModel(), mtoon)) {
-				AccessorModel smoothNormalAccessor = attributes.get("TEXCOORD_7");
-				normals = smoothNormalAccessor != null
-					&& smoothNormalAccessor.getAccessorData().getNumComponentsPerElement() >= 3
-					? readVectors(smoothNormalAccessor, vertexCount, 3, 0.0F)
-					: smoothSplitNormals(positions, normals);
-			}
-			PreparedMaterial material = PreparedMaterial.create(source.getMaterialModel(), textures, mtoon, toonShader);
+			PreparedMaterial material = PreparedMaterial.create(source, source.getMaterialModel(), textures, mtoon, toonShader);
 			AccessorModel texcoordAccessor = attributes.get("TEXCOORD_" + material.texCoordSet());
 			float[] texcoords = texcoordAccessor == null
 				? new float[vertexCount * 2] : readVectors(texcoordAccessor, vertexCount, 2, 0.0F);
@@ -304,24 +310,127 @@ public class RenderedGltfModel {
 			float[] backTexcoords = backTexcoordAccessor == null
 				? texcoords : readVectors(backTexcoordAccessor, vertexCount, 2, 0.0F);
 			float[] colors = readColors(attributes.get("COLOR_0"), vertexCount);
+			boolean toon = toonShader.applies(source, source.getMaterialModel(), mtoon);
+			AccessorModel tangentAccessor = attributes.get("TANGENT");
+			float[] tangents = toon && tangentAccessor != null
+				&& tangentAccessor.getAccessorData().getNumComponentsPerElement() >= 4
+				? readVectors(tangentAccessor, vertexCount, 4, 0.0F) : null;
+			AccessorModel smoothNormalAccessor = attributes.get("TEXCOORD_7");
+			float[] encodedSmoothNormals = toon && smoothNormalAccessor != null
+				&& smoothNormalAccessor.getAccessorData().getNumComponentsPerElement() >= 3
+				? readVectors(smoothNormalAccessor, vertexCount, 3, 0.0F) : null;
 
 			List<Map<String, AccessorModel>> targets = source.getTargets();
 			float[][] morphPositions = new float[targets.size()][];
 			float[][] morphNormals = new float[targets.size()][];
+			float[][] morphTangents = new float[targets.size()][];
 			for (int i = 0; i < targets.size(); i++) {
 				AccessorModel morphPosition = targets.get(i).get("POSITION");
 				AccessorModel morphNormal = targets.get(i).get("NORMAL");
+				AccessorModel morphTangent = targets.get(i).get("TANGENT");
 				morphPositions[i] = morphPosition == null ? null : readVectors(morphPosition, vertexCount, 3, 0.0F);
 				morphNormals[i] = morphNormal == null ? null : readVectors(morphNormal, vertexCount, 3, 0.0F);
+				morphTangents[i] = !toon || morphTangent == null ? null
+					: readVectors(morphTangent, vertexCount, 3, 0.0F);
 			}
 
 			SkinData skinData = SkinData.create(attributes, vertexCount, node.getSkinModel());
+			if (toon) {
+				positions = deindex(positions, 3, indices);
+				normals = normals == null ? null : deindex(normals, 3, indices);
+				texcoords = deindex(texcoords, 2, indices);
+				backTexcoords = deindex(backTexcoords, 2, indices);
+				colors = deindex(colors, 4, indices);
+				tangents = tangents == null ? null : deindex(tangents, 4, indices);
+				encodedSmoothNormals = encodedSmoothNormals == null ? null
+					: deindex(encodedSmoothNormals, 3, indices);
+				for (int i = 0; i < targets.size(); i++) {
+					morphPositions[i] = morphPositions[i] == null ? null : deindex(morphPositions[i], 3, indices);
+					morphNormals[i] = morphNormals[i] == null ? null : deindex(morphNormals[i], 3, indices);
+					morphTangents[i] = morphTangents[i] == null ? null : deindex(morphTangents[i], 3, indices);
+				}
+				skinData = skinData.deindex(indices);
+				vertexCount = indices.length;
+				indices = sequentialIndices(vertexCount);
+			}
+			ToonShaderGeometry toonGeometry = toon
+				? ToonShaderGeometry.create(positions, normals, texcoords, indices, tangents, encodedSmoothNormals,
+					morphTangents, material.toonMaterial().requiresMappedTangents(),
+					toonShader.allowGeneratedSmoothNormals(), toonShader.smoothNormalCosine()) : null;
+			boolean generatedSmoothNormals = toon && encodedSmoothNormals == null
+				&& toonShader.allowGeneratedSmoothNormals();
+			if (material.toonMaterial() != null && toonGeometry == null) {
+				MCglTF.logger.warn("Skipping ToonShader for glTF material {} because NORMAL/TANGENT/smooth-normal data is invalid",
+					source.getMaterialModel() == null ? "<default>" : source.getMaterialModel().getName());
+			}
+
 			return new Primitive(node, mesh, node.getSkinModel(), vertexCount, indices, positions, normals,
-				texcoords, backTexcoords, colors, morphPositions, morphNormals, skinData.influences(), skinData.joints(),
-				skinData.weights(), material);
+				texcoords, backTexcoords, colors, morphPositions, morphNormals, toonGeometry,
+				generatedSmoothNormals, skinData.influences(), skinData.joints(), skinData.weights(), material);
 		}
 
-		static float[] smoothSplitNormals(float[] positions, float[] normals) {
+		static void smoothGeneratedNormals(List<Primitive> primitives, float smoothNormalCosine) {
+			int componentCount = 0;
+			boolean needed = false;
+			for (Primitive primitive : primitives) {
+				if (primitive.toonGeometry != null) {
+					componentCount += primitive.positions.length;
+					needed |= primitive.generatedSmoothNormals;
+				}
+			}
+			if (!needed) {
+				return;
+			}
+
+			float[] positions = new float[componentCount];
+			float[] normals = new float[componentCount];
+			int offset = 0;
+			for (Primitive primitive : primitives) {
+				if (primitive.toonGeometry == null) {
+					continue;
+				}
+				System.arraycopy(primitive.positions, 0, positions, offset, primitive.positions.length);
+				System.arraycopy(primitive.normals, 0, normals, offset, primitive.normals.length);
+				offset += primitive.positions.length;
+			}
+
+			float[] smoothed = smoothSplitNormals(positions, normals, smoothNormalCosine);
+			offset = 0;
+			for (Primitive primitive : primitives) {
+				if (primitive.toonGeometry == null) {
+					continue;
+				}
+				int length = primitive.positions.length;
+				if (primitive.generatedSmoothNormals) {
+					float[] tangentSpace = ToonShaderGeometry.toTangentSpace(
+						Arrays.copyOfRange(smoothed, offset, offset + length), primitive.normals,
+						primitive.toonGeometry.tangents());
+					if (tangentSpace != null) {
+						primitive.toonGeometry = new ToonShaderGeometry(primitive.toonGeometry.tangents(),
+							tangentSpace, primitive.toonGeometry.morphTangents());
+					}
+				}
+				offset += length;
+			}
+		}
+
+		private static float[] deindex(float[] source, int components, int[] indices) {
+			float[] result = new float[indices.length * components];
+			for (int index = 0; index < indices.length; index++) {
+				System.arraycopy(source, indices[index] * components, result, index * components, components);
+			}
+			return result;
+		}
+
+		private static int[] sequentialIndices(int count) {
+			int[] result = new int[count];
+			for (int i = 0; i < count; i++) {
+				result[i] = i;
+			}
+			return result;
+		}
+
+		static float[] smoothSplitNormals(float[] positions, float[] normals, float smoothNormalCosine) {
 			if (normals == null) {
 				return null;
 			}
@@ -348,8 +457,7 @@ public class RenderedGltfModel {
 						float dot = normals[target] * normals[source]
 							+ normals[target + 1] * normals[source + 1]
 							+ normals[target + 2] * normals[source + 2];
-						// ponytail: 45 degrees preserves hard edges; add model metadata only if real assets need tuning.
-						if (dot >= 0.70710677F) {
+						if (dot >= smoothNormalCosine) {
 							x += normals[source];
 							y += normals[source + 1];
 							z += normals[source + 2];
@@ -389,13 +497,14 @@ public class RenderedGltfModel {
 			poseStack.mulPose(nodeTransform);
 			int overlay = material.overlay(packedOverlay);
 			boolean queueToon = shaderModActive && packedOverlay == MTOON_OVERLAY_REQUEST
-				&& material.toonMaterial() != null;
+				&& material.toonMaterial() != null && toonGeometry != null && geometry.tangents != null;
 			collector.submitCustomGeometry(poseStack, material.renderType(shaderModActive),
 				(pose, consumer) -> {
 					render(pose, consumer, light, overlay, geometry, submittedIndices);
 					if (queueToon) {
-						material.toonMaterial().queue(pose, geometry.positions, geometry.normals, texcoords,
-							backTexcoords, vertexColors, submittedIndices, light, toonFrame);
+					material.toonMaterial().queue(pose, geometry.positions, geometry.normals, geometry.tangents,
+						toonGeometry.smoothNormals(), texcoords, backTexcoords, toonVertexColors, submittedIndices,
+						light, toonFrame);
 					}
 				});
 			if (!shaderModActive && packedOverlay == MTOON_OVERLAY_REQUEST && material.outlineRenderType() != null) {
@@ -514,6 +623,7 @@ public class RenderedGltfModel {
 
 			float[] deformedPositions = new float[vertexCount * 3];
 			float[] deformedNormals = new float[vertexCount * 3];
+			float[] deformedTangents = toonGeometry == null ? null : new float[vertexCount * 4];
 			VertexData vertexData = new VertexData();
 			Vector3f transformed = new Vector3f();
 			for (int vertex = 0; vertex < vertexCount; vertex++) {
@@ -525,11 +635,18 @@ public class RenderedGltfModel {
 				deformedNormals[offset] = vertexData.normal.x;
 				deformedNormals[offset + 1] = vertexData.normal.y;
 				deformedNormals[offset + 2] = vertexData.normal.z;
+				if (deformedTangents != null) {
+					int tangent = vertex * 4;
+					deformedTangents[tangent] = vertexData.tangent.x;
+					deformedTangents[tangent + 1] = vertexData.tangent.y;
+					deformedTangents[tangent + 2] = vertexData.tangent.z;
+					deformedTangents[tangent + 3] = vertexData.tangentSign;
+				}
 			}
 
 			cachedMorphWeights = currentMorphWeights.clone();
 			cachedSkinMatrices = copySkinMatrices(palette);
-			cachedGeometry = new DeformedGeometry(deformedPositions, deformedNormals);
+			cachedGeometry = new DeformedGeometry(deformedPositions, deformedNormals, deformedTangents);
 			return cachedGeometry;
 		}
 
@@ -568,6 +685,11 @@ public class RenderedGltfModel {
 			float nx = normals == null ? 0.0F : normals[p];
 			float ny = normals == null ? 1.0F : normals[p + 1];
 			float nz = normals == null ? 0.0F : normals[p + 2];
+			int tangentOffset = vertex * 4;
+			float tx = toonGeometry == null ? 0.0F : toonGeometry.tangents()[tangentOffset];
+			float ty = toonGeometry == null ? 0.0F : toonGeometry.tangents()[tangentOffset + 1];
+			float tz = toonGeometry == null ? 0.0F : toonGeometry.tangents()[tangentOffset + 2];
+			output.tangentSign = toonGeometry == null ? 1.0F : toonGeometry.tangents()[tangentOffset + 3];
 
 			int targetCount = Math.min(currentMorphWeights.length, morphPositions.length);
 			for (int target = 0; target < targetCount; target++) {
@@ -587,14 +709,22 @@ public class RenderedGltfModel {
 					ny += targetNormals[p + 1] * weight;
 					nz += targetNormals[p + 2] * weight;
 				}
+				float[] targetTangents = toonGeometry == null ? null : toonGeometry.morphTangents()[target];
+				if (targetTangents != null) {
+					tx += targetTangents[p] * weight;
+					ty += targetTangents[p + 1] * weight;
+					tz += targetTangents[p + 2] * weight;
+				}
 			}
 
 			if (palette == null) {
 				output.position.set(x, y, z);
 				output.normal.set(nx, ny, nz);
+				output.tangent.set(tx, ty, tz);
 			} else {
 				output.position.zero();
 				output.normal.zero();
+				output.tangent.zero();
 				float totalWeight = 0.0F;
 				int influenceOffset = vertex * influences;
 				for (int influence = 0; influence < influences; influence++) {
@@ -609,19 +739,32 @@ public class RenderedGltfModel {
 					transformed.set(nx, ny, nz);
 					palette.normals()[joint].transform(transformed);
 					output.normal.fma(weight, transformed);
+					if (toonGeometry != null) {
+						transformed.set(tx, ty, tz);
+						palette.positions()[joint].transformDirection(transformed);
+						output.tangent.fma(weight, transformed);
+					}
 					totalWeight += weight;
 				}
 				if (totalWeight <= 1.0E-6F) {
 					output.position.set(x, y, z);
 					output.normal.set(nx, ny, nz);
+					output.tangent.set(tx, ty, tz);
 				} else if (totalWeight != 1.0F) {
 					output.position.div(totalWeight);
 					output.normal.div(totalWeight);
+					output.tangent.div(totalWeight);
 				}
 			}
 
 			if (output.normal.lengthSquared() > 1.0E-12F) {
 				output.normal.normalize();
+			}
+			if (toonGeometry != null) {
+				output.tangent.fma(-output.tangent.dot(output.normal), output.normal);
+				if (output.tangent.lengthSquared() > 1.0E-12F) {
+					output.tangent.normalize();
+				}
 			}
 		}
 
@@ -660,12 +803,27 @@ public class RenderedGltfModel {
 	private static final class VertexData {
 		final Vector3f position = new Vector3f();
 		final Vector3f normal = new Vector3f();
+		final Vector3f tangent = new Vector3f();
+		float tangentSign;
 	}
 
-	private record DeformedGeometry(float[] positions, float[] normals) {
+	private record DeformedGeometry(float[] positions, float[] normals, float[] tangents) {
 	}
 
 	private record SkinData(int influences, int[] joints, float[] weights) {
+		SkinData deindex(int[] indices) {
+			if (influences == 0) {
+				return this;
+			}
+			int[] expandedJoints = new int[indices.length * influences];
+			float[] expandedWeights = new float[indices.length * influences];
+			for (int index = 0; index < indices.length; index++) {
+				System.arraycopy(joints, indices[index] * influences, expandedJoints, index * influences, influences);
+				System.arraycopy(weights, indices[index] * influences, expandedWeights, index * influences, influences);
+			}
+			return new SkinData(influences, expandedJoints, expandedWeights);
+		}
+
 		static SkinData create(Map<String, AccessorModel> attributes, int vertexCount, SkinModel skin) {
 			if (skin == null || !attributes.containsKey("JOINTS_0") || !attributes.containsKey("WEIGHTS_0")) {
 				return new SkinData(0, new int[0], new float[0]);
@@ -863,11 +1021,13 @@ public class RenderedGltfModel {
 			return mtoonAtlas.vOffset() + normalized * mtoonAtlas.vScale();
 		}
 
-		static PreparedMaterial create(MaterialModel source, TextureRegistry textures, MToonProfile mtoon,
+		static PreparedMaterial create(MeshPrimitiveModel primitive, MaterialModel source, TextureRegistry textures,
+			MToonProfile mtoon,
 			ToonShaderModel toonShader) {
 			TextureModel baseTexture = null;
 			TextureModel normalTexture = null;
 			TextureModel emissionTexture = null;
+			float normalScale = 1.0F;
 			float[] colorFactor = new float[] {1.0F, 1.0F, 1.0F, 1.0F};
 			Vector4f emissionColor = new Vector4f(mtoon.emissionColor());
 			AlphaMode alphaMode = AlphaMode.OPAQUE;
@@ -879,6 +1039,7 @@ public class RenderedGltfModel {
 			if (source instanceof MaterialModelV2 material) {
 				baseTexture = material.getBaseColorTexture();
 				normalTexture = material.getNormalTexture();
+				normalScale = material.getNormalScale();
 				emissionTexture = material.getEmissiveTexture();
 				colorFactor = material.getBaseColorFactor().clone();
 				float[] factor = material.getEmissiveFactor();
@@ -920,9 +1081,10 @@ public class RenderedGltfModel {
 			} else {
 				renderType = shaderRenderType;
 			}
-			ToonShaderMaterial toonMaterial = toonShader.material(source, textures, mtoon,
+			ToonShaderMaterial toonMaterial = toonShader.material(primitive, source, textures, mtoon,
 				new ToonShaderMaterial.Inputs(baseTexture, shadeTexture, normalTexture, emissionTexture,
-					policy, alphaMode, alphaCutoff, doubleSided, emissionColor));
+					policy, alphaMode, alphaCutoff, doubleSided, new Vector4f(colorFactor[0], colorFactor[1],
+						colorFactor[2], colorFactor[3]), emissionColor, normalScale));
 			return new PreparedMaterial(texture, renderType, shaderRenderType, outlineRenderType, colorFactor, unlit,
 				mtoon.overlay(), texCoordSet, mtoonAtlas, toonMaterial);
 		}
@@ -1211,7 +1373,7 @@ public class RenderedGltfModel {
 		output.add(c);
 	}
 
-	private static float[] readVectors(AccessorModel accessor, int expectedCount, int components, float defaultValue) {
+	static float[] readVectors(AccessorModel accessor, int expectedCount, int components, float defaultValue) {
 		float[] output = new float[expectedCount * components];
 		if (defaultValue != 0.0F) {
 			java.util.Arrays.fill(output, defaultValue);

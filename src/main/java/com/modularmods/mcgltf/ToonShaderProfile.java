@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,6 +20,8 @@ import com.google.gson.JsonParser;
 
 import de.javagl.jgltf.model.GltfModel;
 import de.javagl.jgltf.model.MaterialModel;
+import de.javagl.jgltf.model.MeshModel;
+import de.javagl.jgltf.model.MeshPrimitiveModel;
 import de.javagl.jgltf.model.NodeModel;
 
 final class ToonShaderProfile {
@@ -32,24 +35,37 @@ final class ToonShaderProfile {
 	final Vector3f headForward;
 	final Vector3f headRight;
 	final Vector3f lightDirectionMultiplier;
+	final float baseColorScale;
 	final Path rampTexture;
 	final Map<Integer, MaterialOverride> materials;
+	final Map<MeshPrimitiveModel, MaterialOverride> primitives;
+	final int version;
+	final boolean generateSmoothNormals;
+	final float smoothNormalCosine;
 
 	private ToonShaderProfile(NodeModel head, Vector3f headForward, Vector3f headRight,
-		Vector3f lightDirectionMultiplier, Path rampTexture, Map<Integer, MaterialOverride> materials) {
+		Vector3f lightDirectionMultiplier, float baseColorScale, Path rampTexture, Map<Integer, MaterialOverride> materials,
+		Map<MeshPrimitiveModel, MaterialOverride> primitives, int version, boolean generateSmoothNormals,
+		float smoothNormalCosine) {
 		this.head = head;
 		this.headForward = headForward;
 		this.headRight = headRight;
 		this.lightDirectionMultiplier = lightDirectionMultiplier;
+		this.baseColorScale = baseColorScale;
 		this.rampTexture = rampTexture;
 		this.materials = Map.copyOf(materials);
+		this.primitives = Map.copyOf(primitives);
+		this.version = version;
+		this.generateSmoothNormals = generateSmoothNormals;
+		this.smoothNormalCosine = smoothNormalCosine;
 	}
 
 	static ToonShaderProfile load(GltfModel model, Path profilePath) {
 		NodeModel head = humanoidHead(model);
 		if (profilePath == null || !Files.isRegularFile(profilePath)) {
 			return new ToonShaderProfile(head, new Vector3f(DEFAULT_FORWARD), new Vector3f(DEFAULT_RIGHT),
-				new Vector3f(DEFAULT_LIGHT_MULTIPLIER), null, Map.of());
+				new Vector3f(DEFAULT_LIGHT_MULTIPLIER), 1.0F, null, Map.of(), Map.of(), 0, true,
+				(float)Math.cos(Math.toRadians(45.0)));
 		}
 
 		try {
@@ -64,8 +80,9 @@ final class ToonShaderProfile {
 				}
 				json = parsed.getAsJsonObject();
 			}
-			if (integer(json, "version", -1) != 1) {
-				throw new IOException("ToonShader profile version must be 1");
+			int version = integer(json, "version", -1);
+			if (version != 1 && version != 2) {
+				throw new IOException("ToonShader profile version must be 1 or 2");
 			}
 
 			Path root = profilePath.toAbsolutePath().normalize().getParent();
@@ -81,15 +98,30 @@ final class ToonShaderProfile {
 				|| lightMultiplier.lengthSquared() < 1.0E-8F) {
 				throw new IOException("lightDirectionMultiplier must contain non-negative, non-zero values");
 			}
+			float baseColorScale = number(json, "baseColorScale", 1.0F);
+			if (baseColorScale < 0.0F || baseColorScale > 16.0F) {
+				throw new IOException("baseColorScale must be between 0 and 16");
+			}
 			Path ramp = texture(root, string(json, "rampTexture"));
-			Map<Integer, MaterialOverride> overrides = materialOverrides(model, root, array(json, "materials"));
-			return new ToonShaderProfile(head, forward, right, lightMultiplier, ramp, overrides);
+			String smoothNormals = string(json, "smoothNormals");
+			if (smoothNormals != null && !smoothNormals.equals("generate")) {
+				throw new IOException("smoothNormals must be generate when present");
+			}
+			float smoothNormalAngle = number(json, "smoothNormalAngle", 45.0F);
+			if (smoothNormalAngle < 0.0F || smoothNormalAngle > 180.0F) {
+				throw new IOException("smoothNormalAngle must be between 0 and 180");
+			}
+			Map<Integer, MaterialOverride> overrides = materialOverrides(model, root, array(json, "materials"), version);
+			Map<MeshPrimitiveModel, MaterialOverride> primitives = primitiveOverrides(model, root,
+				array(json, "primitives"), version);
+			return new ToonShaderProfile(head, forward, right, lightMultiplier, baseColorScale, ramp, overrides, primitives, version,
+				version < 2 || smoothNormals != null, (float)Math.cos(Math.toRadians(smoothNormalAngle)));
 		} catch (IOException | RuntimeException exception) {
 			throw new IllegalArgumentException("Could not read " + profilePath.getFileName() + ": " + exception.getMessage(), exception);
 		}
 	}
 
-	private static Map<Integer, MaterialOverride> materialOverrides(GltfModel model, Path root, JsonArray values)
+	private static Map<Integer, MaterialOverride> materialOverrides(GltfModel model, Path root, JsonArray values, int version)
 		throws IOException {
 		if (values == null) {
 			return Map.of();
@@ -101,11 +133,69 @@ final class ToonShaderProfile {
 			}
 			JsonObject json = value.getAsJsonObject();
 			int material = material(model, json);
-			if (result.put(material, MaterialOverride.read(root, json)) != null) {
+			if (result.put(material, MaterialOverride.read(root, json, version)) != null) {
 				throw new IOException("material " + material + " is configured more than once");
 			}
 		}
 		return result;
+	}
+
+	private static Map<MeshPrimitiveModel, MaterialOverride> primitiveOverrides(GltfModel model, Path root,
+		JsonArray values, int version) throws IOException {
+		if (values == null) {
+			return Map.of();
+		}
+		Map<MeshPrimitiveModel, MaterialOverride> result = new IdentityHashMap<>();
+		for (JsonElement value : values) {
+			if (!value.isJsonObject()) {
+				throw new IOException("primitives entries must be objects");
+			}
+			JsonObject json = value.getAsJsonObject();
+			MeshModel mesh = mesh(model, object(json, "mesh"));
+			int primitiveIndex = integer(json, "primitive", -1);
+			if (primitiveIndex < 0 || primitiveIndex >= mesh.getMeshPrimitiveModels().size()) {
+				throw new IOException("primitive index " + primitiveIndex + " is out of range");
+			}
+			MeshPrimitiveModel primitive = mesh.getMeshPrimitiveModels().get(primitiveIndex);
+			if (result.put(primitive, MaterialOverride.read(root, json, version)) != null) {
+				throw new IOException("mesh primitive is configured more than once");
+			}
+		}
+		return result;
+	}
+
+	private static MeshModel mesh(GltfModel model, JsonObject json) throws IOException {
+		if (json == null) {
+			throw new IOException("primitive entry needs a mesh selector");
+		}
+		int index = integer(json, "index", -1);
+		String name = string(json, "name");
+		List<MeshModel> meshes = model.getMeshModels();
+		if (index >= 0) {
+			if (index >= meshes.size()) {
+				throw new IOException("mesh index " + index + " is out of range");
+			}
+			if (name != null && !name.equals(meshes.get(index).getName())) {
+				throw new IOException("mesh index/name do not identify the same mesh");
+			}
+			return meshes.get(index);
+		}
+		if (name == null || name.isBlank()) {
+			throw new IOException("mesh selector needs index or name");
+		}
+		MeshModel found = null;
+		for (MeshModel mesh : meshes) {
+			if (name.equals(mesh.getName())) {
+				if (found != null) {
+					throw new IOException("mesh name " + name + " is ambiguous; use index");
+				}
+				found = mesh;
+			}
+		}
+		if (found == null) {
+			throw new IOException("mesh " + name + " was not found");
+		}
+		return found;
 	}
 
 	private static int material(GltfModel model, JsonObject json) throws IOException {
@@ -209,11 +299,13 @@ final class ToonShaderProfile {
 			return null;
 		}
 		Path path = root.resolve(value).normalize();
-		if (!path.startsWith(root) || !path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png")
-			|| !Files.isRegularFile(path) || Files.size(path) > MAX_TEXTURE_BYTES) {
+		Path realPath = path.toRealPath();
+		if (!path.startsWith(root) || !realPath.startsWith(root.toRealPath())
+			|| !path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png")
+			|| !Files.isRegularFile(realPath) || Files.size(realPath) > MAX_TEXTURE_BYTES) {
 			throw new IOException("texture must be a PNG file inside the profile directory and no larger than 64 MiB: " + value);
 		}
-		return path;
+		return realPath;
 	}
 
 	private static JsonObject object(JsonObject parent, String name) {
@@ -277,6 +369,14 @@ final class ToonShaderProfile {
 	}
 
 	private static float[] color(JsonObject parent, String name) throws IOException {
+		return color(parent, name, 1.0F);
+	}
+
+	private static float[] hdrColor(JsonObject parent, String name) throws IOException {
+		return color(parent, name, 16.0F);
+	}
+
+	private static float[] color(JsonObject parent, String name, float maximum) throws IOException {
 		JsonElement value = parent == null ? null : parent.get(name);
 		if (value == null) {
 			return null;
@@ -288,8 +388,8 @@ final class ToonShaderProfile {
 		float[] result = {array.get(0).getAsFloat(), array.get(1).getAsFloat(), array.get(2).getAsFloat(),
 			array.size() == 4 ? array.get(3).getAsFloat() : 1.0F};
 		for (float channel : result) {
-			if (!Float.isFinite(channel) || channel < 0.0F || channel > 1.0F) {
-				throw new IOException(name + " channels must be between 0 and 1");
+			if (!Float.isFinite(channel) || channel < 0.0F || channel > maximum) {
+				throw new IOException(name + " channels must be between 0 and " + maximum);
 			}
 		}
 		return result;
@@ -331,8 +431,9 @@ final class ToonShaderProfile {
 	}
 
 	record MaterialOverride(
-		Path shadeTexture, Path normalTexture, Path emissionTexture, Path matcapTexture, Path rimTexture,
-		Path outlineWidthTexture, Path lightMap, Path faceMap, int materialType, boolean face,
+		Path baseTexture, Path shadeTexture, Path normalTexture, Path emissionTexture, Path matcapTexture, Path rimTexture,
+		Path outlineWidthTexture, Path lightMap, Path rampTexture, Path faceMap, Path faceLightMap, Path faceShadow,
+		int materialType, boolean face, boolean directionalFaceSdf,
 		boolean metallic, boolean outline, boolean outlineScreenSpace, boolean outlineVertexAlpha,
 		boolean backUv, float shadowOffset, float shadowSmoothness, float nonMetalSpecular,
 		float metalSpecular, float specularShininess, float emissionIntensity, float rimOffset,
@@ -340,9 +441,10 @@ final class ToonShaderProfile {
 		float outlineDistanceFar, float outlineScaleNear, float outlineScaleFar, float outlineZOffset,
 		float outlineLightingMix, float faceShadowStrength,
 		float faceShadowOffset, float blushIntensity, float[] shadeColor, float[] emissionColor, float[] rimColor,
-		float[] outlineColor, float[][] outlineColors, float[] blushColor, float[] screenOffset) {
+		float[] outlineColor, float[][] outlineColors, float[] blushColor, float[] baseColorFactor,
+		float[] screenOffset) {
 
-		static MaterialOverride read(Path root, JsonObject json) throws IOException {
+		static MaterialOverride read(Path root, JsonObject json, int version) throws IOException {
 			int materialType = integer(json, "materialType", -1);
 			if (materialType < -1 || materialType > 4) {
 				throw new IOException("materialType must be between 0 and 4");
@@ -351,12 +453,26 @@ final class ToonShaderProfile {
 			if (outlineMode != null && !outlineMode.equals("world") && !outlineMode.equals("screen")) {
 				throw new IOException("outlineMode must be world or screen");
 			}
+			String faceSdfLayout = string(json, "faceSdfLayout");
+			if (faceSdfLayout != null && !faceSdfLayout.equals("mirrored-r")
+				&& !faceSdfLayout.equals("directional-rg")) {
+				throw new IOException("faceSdfLayout must be mirrored-r or directional-rg");
+			}
+			boolean face = bool(json, "face", false);
+			if (faceSdfLayout != null && (version != 2 || !face)) {
+				throw new IOException("faceSdfLayout requires a version 2 face material");
+			}
+			Path faceMap = texture(root, string(json, "faceMap"));
+			Path faceLightMap = texture(root, string(json, "faceLightMap"));
+			Path faceShadow = texture(root, string(json, "faceShadow"));
 			MaterialOverride result = new MaterialOverride(
-				texture(root, string(json, "shadeTexture")), texture(root, string(json, "normalTexture")),
+				texture(root, string(json, "baseTexture")), texture(root, string(json, "shadeTexture")),
+				texture(root, string(json, "normalTexture")),
 				texture(root, string(json, "emissionTexture")), texture(root, string(json, "matcapTexture")),
 				texture(root, string(json, "rimTexture")), texture(root, string(json, "outlineWidthTexture")),
-				texture(root, string(json, "lightMap")), texture(root, string(json, "faceMap")), materialType,
-				bool(json, "face", false), bool(json, "metallic", false), bool(json, "outline", false),
+				texture(root, string(json, "lightMap")), texture(root, string(json, "rampTexture")),
+				faceMap, faceLightMap, faceShadow, materialType,
+				face, "directional-rg".equals(faceSdfLayout), bool(json, "metallic", false), bool(json, "outline", false),
 				"screen".equals(outlineMode), bool(json, "outlineVertexAlpha", false), bool(json, "backUv", false),
 				number(json, "shadowOffset", Float.NaN), number(json, "shadowSmoothness", Float.NaN),
 				number(json, "nonMetalSpecular", Float.NaN), number(json, "metalSpecular", Float.NaN),
@@ -368,11 +484,17 @@ final class ToonShaderProfile {
 				number(json, "outlineScaleFar", Float.NaN), number(json, "outlineZOffset", Float.NaN),
 				number(json, "outlineLightingMix", Float.NaN), number(json, "faceShadowStrength", Float.NaN),
 				number(json, "faceShadowOffset", Float.NaN), number(json, "blushIntensity", Float.NaN),
-				color(json, "shadeColor"), color(json, "emissionColor"),
-				color(json, "rimColor"), color(json, "outlineColor"), colors(json, "outlineColors"),
-				color(json, "blushColor"), vector4(json, "screenOffset"));
-			if (result.face && result.faceMap == null) {
-				throw new IOException("face materials require faceMap");
+				hdrColor(json, "shadeColor"), hdrColor(json, "emissionColor"),
+				hdrColor(json, "rimColor"), color(json, "outlineColor"), colors(json, "outlineColors"),
+				color(json, "blushColor"), color(json, "baseColorFactor"), vector4(json, "screenOffset"));
+			if (version == 1 && result.face && result.faceMap == null) {
+				throw new IOException("version 1 face materials require faceMap");
+			}
+			if (version == 2 && result.face && (result.faceLightMap == null || result.faceShadow == null)) {
+				throw new IOException("version 2 face materials require faceLightMap and faceShadow");
+			}
+			if (version == 2 && result.faceMap != null) {
+				throw new IOException("version 2 uses separate faceLightMap and faceShadow textures");
 			}
 			nonNegative("shadowSmoothness", result.shadowSmoothness);
 			nonNegative("nonMetalSpecular", result.nonMetalSpecular);

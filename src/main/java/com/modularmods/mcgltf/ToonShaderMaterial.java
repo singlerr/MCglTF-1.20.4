@@ -10,14 +10,21 @@ import net.minecraft.resources.Identifier;
 
 final class ToonShaderMaterial {
 	private final ToonShaderRenderer.Material material;
+	private final boolean mappedNormal;
 
-	private ToonShaderMaterial(ToonShaderRenderer.Material material) {
+	private ToonShaderMaterial(ToonShaderRenderer.Material material, boolean mappedNormal) {
 		this.material = material;
+		this.mappedNormal = mappedNormal;
 	}
 
 	static ToonShaderMaterial create(ToonShaderModel model, RenderedGltfModel.TextureRegistry textures,
 		RenderedGltfModel.MToonProfile mtoon, ToonShaderProfile.MaterialOverride override, Inputs inputs) {
-		Identifier base = textures.resolve(inputs.baseTexture, inputs.policy);
+		float normalScale = override != null && override.normalTexture() != null ? 1.0F : inputs.normalScale;
+		boolean mappedNormal = normalScale != 0.0F && (inputs.normalTexture != null || mtoon.normalTextureIndex() >= 0
+			|| override != null && override.normalTexture() != null);
+		Identifier alpha = textures.resolve(inputs.baseTexture, inputs.policy);
+		Identifier base = textures.resolve(override == null ? null : override.baseTexture(),
+			alpha);
 		Identifier shade = textures.resolve(override == null ? null : override.shadeTexture(),
 			textures.resolve(inputs.shadeTexture, RenderedGltfModel.AlphaPolicy.NONE));
 		Identifier normal = textures.resolve(override == null ? null : override.normalTexture(),
@@ -36,7 +43,8 @@ final class ToonShaderMaterial {
 		Identifier outlineWidthTexture = textures.resolve(override == null ? null : override.outlineWidthTexture(),
 			textures.resolve(textures.textureAt(mtoon.outlineWidthTextureIndex()),
 				RenderedGltfModel.AlphaPolicy.NONE, textures.white()));
-		Vector4f shadeColor = vector(override == null ? null : override.shadeColor(), mtoon.shadeColor());
+		Vector4f shadeColor = vector(override == null ? null : override.shadeColor(),
+			override == null ? mtoon.shadeColor() : new Vector4f(1.1F));
 		Vector4f emissionColor = vector(override == null ? null : override.emissionColor(), inputs.emissionColor);
 		Vector4f rimColor = vector(override == null ? null : override.rimColor(), mtoon.rimColor());
 		Vector4f outlineColor = vector(override == null ? null : override.outlineColor(), mtoon.outlineColor());
@@ -46,48 +54,71 @@ final class ToonShaderMaterial {
 		float emissionIntensity = value(override == null ? Float.NaN : override.emissionIntensity(),
 			emissionColor.x + emissionColor.y + emissionColor.z > 0.0F ? 1.0F : 0.0F);
 		boolean hasRim = rimColor.x + rimColor.y + rimColor.z > 0.0F;
-		return new ToonShaderMaterial(new ToonShaderRenderer.Material(base, shade, normal, emission, matcap, rim,
+		float baseColorScale = model.baseColorScale();
+		Vector4f baseColor = vector(override == null ? null : override.baseColorFactor(), inputs.baseColor)
+			.mul(baseColorScale, baseColorScale, baseColorScale, 1.0F);
+		boolean legacyFaceInputs = override != null && override.face() && !model.officialFaceInputs();
+		Identifier faceLightMap = textures.resolve(override == null ? null
+			: legacyFaceInputs ? override.faceMap() : override.faceLightMap(), model.defaultFaceTexture(textures));
+		Identifier faceShadow = textures.resolve(override == null ? null
+			: legacyFaceInputs ? override.faceMap() : override.faceShadow(), model.defaultFaceTexture(textures));
+		return new ToonShaderMaterial(new ToonShaderRenderer.Material(base, alpha, shade, normal, emission, matcap, rim,
 			outlineWidthTexture,
 			textures.resolve(override == null ? null : override.lightMap(), model.defaultLightMap(textures)),
-			textures.resolve(override == null ? null : override.faceMap(), model.defaultFaceMap(textures)),
-			model.ramp(textures), shadeColor, emissionColor, rimColor,
+			faceLightMap, faceShadow,
+			textures.resolve(override == null ? null : override.rampTexture(), model.ramp(textures)),
+			baseColor, shadeColor, emissionColor, rimColor,
 			outlineColors[0], outlineColors[1], outlineColors[2], outlineColors[3], outlineColors[4],
 			vector(override == null ? null : override.blushColor(), new Vector4f(1.0F, 0.45F, 0.5F, 1.0F)),
 			screenOffset(override),
 			mtoon.shadeShift(), mtoon.shadingToony(),
-			value(override == null ? Float.NaN : override.shadowOffset(), mtoon.shadeShift() * 0.5F),
+			value(override == null ? Float.NaN : override.shadowOffset(),
+				override == null ? mtoon.shadeShift() * 0.5F : 0.1F),
 			value(override == null ? Float.NaN : override.shadowSmoothness(),
-				Math.max(0.001F, (1.0F - mtoon.shadingToony()) * 0.5F)),
+				override == null ? Math.max(0.001F, (1.0F - mtoon.shadingToony()) * 0.5F) : 0.4F),
 			mtoon.giEqualization(), override == null ? -1.0F : override.materialType(),
-			value(override == null ? Float.NaN : override.nonMetalSpecular(), 0.3F),
-			value(override == null ? Float.NaN : override.metalSpecular(), 0.8F),
-			value(override == null ? Float.NaN : override.specularShininess(), 10.0F), emissionIntensity,
-			value(override == null ? Float.NaN : override.rimOffset(), hasRim ? 2.0F : 0.0F),
-			value(override == null ? Float.NaN : override.rimThreshold(), Math.max(0.05F, 1.0F - mtoon.rimLift())),
-			value(override == null ? Float.NaN : override.rimIntensity(), hasRim ? 1.0F : 0.0F),
-			value(override == null ? Float.NaN : override.rimPower(), mtoon.rimFresnelPower()),
-			value(override == null ? Float.NaN : override.outlineWidth(), mtoon.outlineWidth()),
+			value(override == null ? Float.NaN : override.nonMetalSpecular(), override == null ? 0.3F : 0.0F),
+			value(override == null ? Float.NaN : override.metalSpecular(), override == null ? 0.8F : 0.0F),
+			value(override == null ? Float.NaN : override.specularShininess(), override == null ? 10.0F : 5.0F),
+			emissionIntensity,
+			value(override == null ? Float.NaN : override.rimOffset(),
+				override == null ? (hasRim ? 2.0F : 0.0F) : 5.0F),
+			value(override == null ? Float.NaN : override.rimThreshold(),
+				override == null ? Math.max(0.05F, 1.0F - mtoon.rimLift()) : 0.5F),
+			value(override == null ? Float.NaN : override.rimIntensity(),
+				override == null && hasRim ? 1.0F : 0.0F),
+			value(override == null ? Float.NaN : override.rimPower(), override == null ? mtoon.rimFresnelPower() : 5.0F),
+			value(override == null ? Float.NaN : override.outlineWidth(), override == null ? mtoon.outlineWidth() : 0.0F),
 			value(override == null ? Float.NaN : override.outlineDistanceNear(), 0.0F),
-			value(override == null ? Float.NaN : override.outlineDistanceFar(), mtoon.outlineDistanceFar()),
-			value(override == null ? Float.NaN : override.outlineScaleNear(), 1.0F),
+			value(override == null ? Float.NaN : override.outlineDistanceFar(),
+				override == null ? mtoon.outlineDistanceFar() : 1.0F),
+			value(override == null ? Float.NaN : override.outlineScaleNear(), override == null ? 1.0F : 0.0F),
 			value(override == null ? Float.NaN : override.outlineScaleFar(),
-				mtoon.outlineDistanceFade() ? 0.0F : 1.0F),
+				override == null ? (mtoon.outlineDistanceFade() ? 0.0F : 1.0F) : 1.0F),
 			value(override == null ? Float.NaN : override.outlineZOffset(), 0.0F),
-			value(override == null ? Float.NaN : override.outlineLightingMix(), mtoon.outlineLightingMix()),
+			value(override == null ? Float.NaN : override.outlineLightingMix(),
+				override == null ? mtoon.outlineLightingMix() : 0.0F),
 			value(override == null ? Float.NaN : override.faceShadowStrength(), 1.0F),
 			value(override == null ? Float.NaN : override.faceShadowOffset(), 0.0F),
-			value(override == null ? Float.NaN : override.blushIntensity(), 0.0F), alphaThreshold,
+			value(override == null ? Float.NaN : override.blushIntensity(), 0.0F), alphaThreshold, normalScale,
 			override != null && override.face(), override != null && override.metallic(),
 			mtoon.outline() || override != null && override.outline(),
 			override != null ? override.outlineScreenSpace() : mtoon.outlineScreenSpace(),
 			override != null && override.outlineVertexAlpha(), override != null && override.backUv(),
-			inputs.doubleSided));
+			override != null && override.directionalFaceSdf(), legacyFaceInputs,
+			inputs.alphaMode != AlphaMode.OPAQUE,
+			inputs.alphaMode == AlphaMode.BLEND, inputs.doubleSided, override != null), mappedNormal);
 	}
 
-	void queue(PoseStack.Pose pose, float[] positions, float[] normals, float[] texcoords, float[] backTexcoords,
-		int[] vertexColors, int[] indices, int packedLight, ToonShaderModel.Frame frame) {
-		ToonShaderRenderer.queue(pose, positions, normals, texcoords, backTexcoords, vertexColors, indices,
-			packedLight, material, frame);
+	boolean requiresMappedTangents() {
+		return mappedNormal;
+	}
+
+	void queue(PoseStack.Pose pose, float[] positions, float[] normals, float[] tangents, float[] smoothNormals,
+		float[] texcoords, float[] backTexcoords, int[] vertexColors, int[] indices, int packedLight,
+		ToonShaderModel.Frame frame) {
+		ToonShaderRenderer.queue(pose, positions, normals, tangents, smoothNormals, texcoords, backTexcoords,
+			vertexColors, indices, packedLight, material, frame);
 	}
 
 	private static float value(float value, float fallback) {
@@ -115,6 +146,6 @@ final class ToonShaderMaterial {
 
 	record Inputs(TextureModel baseTexture, TextureModel shadeTexture, TextureModel normalTexture,
 		TextureModel emissionTexture, RenderedGltfModel.AlphaPolicy policy, AlphaMode alphaMode,
-		float alphaCutoff, boolean doubleSided, Vector4f emissionColor) {
+		float alphaCutoff, boolean doubleSided, Vector4f baseColor, Vector4f emissionColor, float normalScale) {
 	}
 }

@@ -3,6 +3,7 @@ package com.modularmods.mcgltf;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
@@ -12,11 +13,16 @@ import org.joml.Vector4f;
 
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.buffers.Std140SizeCalculator;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
+import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.shaders.UniformType;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -45,12 +51,13 @@ final class ToonShaderRenderer {
 		.addAttribute("UV2", GpuFormat.RG16_SINT)
 		.addAttribute("UV1", GpuFormat.RG16_SINT)
 		.addAttribute("Normal", GpuFormat.RGBA8_SNORM)
+		.addAttribute("LineWidth", GpuFormat.R32_UINT)
 		.build();
 	private static final int MATERIAL_UBO_SIZE = new Std140SizeCalculator()
 		.putVec4().putVec4().putVec4().putVec4().putVec4().putVec4()
 		.putVec4().putVec4().putVec4().putVec4().putVec4().putVec4()
 		.putVec4().putVec4().putVec4().putVec4().putVec4().putVec4()
-		.putVec4().putVec4().putVec4().putVec4().get();
+		.putVec4().putVec4().putVec4().putVec4().putVec4().get();
 	private static final int PROJECTION_UBO_SIZE = new Std140SizeCalculator().putMat4f().get();
 	private static final BindGroupLayout PROJECTION_LAYOUT = BindGroupLayout.builder()
 		.withUniform("ToonProjection", UniformType.UNIFORM_BUFFER)
@@ -58,6 +65,7 @@ final class ToonShaderRenderer {
 	private static final BindGroupLayout MATERIAL_LAYOUT = BindGroupLayout.builder()
 		.withUniform("ToonMaterial", UniformType.UNIFORM_BUFFER)
 		.withSampler("BaseTexture")
+		.withSampler("AlphaTexture")
 		.withSampler("ShadeTexture")
 		.withSampler("NormalTexture")
 		.withSampler("EmissionTexture")
@@ -65,15 +73,22 @@ final class ToonShaderRenderer {
 		.withSampler("RimTexture")
 		.withSampler("OutlineWidthTexture")
 		.withSampler("LightMapTexture")
-		.withSampler("FaceMapTexture")
+		.withSampler("FaceLightMapTexture")
+		.withSampler("FaceShadowTexture")
 		.withSampler("RampTexture")
 		.withSampler("MinecraftLightmap")
-		.withSampler("SceneColor")
 		.withSampler("SceneDepth")
+		.withSampler("ToonDepth")
 		.build();
-	private static final RenderPipeline BASE_CULL = pipeline("toon_shader_base_cull", false, true);
-	private static final RenderPipeline BASE_DOUBLE_SIDED = pipeline("toon_shader_base_double_sided", false, false);
-	private static final RenderPipeline OUTLINE = pipeline("toon_shader_outline", true, false);
+	private static final RenderPipeline BASE_CULL = pipeline("toon_shader_base_cull", false, false, true, true, false);
+	private static final RenderPipeline BASE_DOUBLE_SIDED = pipeline("toon_shader_base_double_sided", false, false, false, true, false);
+	private static final RenderPipeline BLEND_CULL = pipeline("toon_shader_blend_cull", false, false, true, false, true);
+	private static final RenderPipeline BLEND_DOUBLE_SIDED = pipeline("toon_shader_blend_double_sided", false, false, false, false, true);
+	private static final RenderPipeline DEPTH_CULL = pipeline("toon_shader_depth_cull", false, true, true, true, false);
+	private static final RenderPipeline DEPTH_DOUBLE_SIDED = pipeline("toon_shader_depth_double_sided", false, true, false, true, false);
+	private static final RenderPipeline OUTLINE = pipeline("toon_shader_outline", true, false, false, true, false);
+	private static final RenderPipeline[] PIPELINES = {BASE_CULL, BASE_DOUBLE_SIDED, BLEND_CULL,
+		BLEND_DOUBLE_SIDED, DEPTH_CULL, DEPTH_DOUBLE_SIDED, OUTLINE};
 	private static final StagedVertexBuffer BUFFER = new StagedVertexBuffer(() -> "MCglTF ToonShader", 1024 * 1024);
 	private static final DynamicUniformStorage<MaterialUniform> UNIFORMS =
 		new DynamicUniformStorage<>("MCglTF ToonShader materials", MATERIAL_UBO_SIZE, 32);
@@ -82,10 +97,7 @@ final class ToonShaderRenderer {
 	private static final List<QueuedDraw> DRAWS = new ArrayList<>();
 	private static final Matrix4f PROJECTION = new Matrix4f();
 
-	private static GpuTexture sceneColor;
-	private static GpuTextureView sceneColorView;
-	private static GpuTexture sceneDepth;
-	private static GpuTextureView sceneDepthView;
+	private static GpuTexture failedColorTarget;
 	private static long frameTime = Long.MIN_VALUE;
 	private static long lastRenderNanos;
 
@@ -96,8 +108,9 @@ final class ToonShaderRenderer {
 		PROJECTION.set(projection);
 	}
 
-	static void queue(PoseStack.Pose pose, float[] positions, float[] normals, float[] texcoords,
-		float[] backTexcoords, int[] vertexColors, int[] indices, int packedLight, Material material,
+	static void queue(PoseStack.Pose pose, float[] positions, float[] normals, float[] tangents,
+		float[] smoothNormals, float[] texcoords, float[] backTexcoords, int[] vertexColors, int[] indices,
+		int packedLight, Material material,
 		ToonShaderModel.Frame frame) {
 		long currentFrame = Minecraft.getInstance().getFrameTimeNs();
 		if (currentFrame != frameTime) {
@@ -112,12 +125,18 @@ final class ToonShaderRenderer {
 		Matrix4f positionTransform = new Matrix4f(modelView).mul(pose.pose());
 		Matrix3f normalTransform = new Matrix3f(modelView).mul(pose.normal());
 		emit(BUFFER.getVertexBuilder(base), positionTransform, normalTransform,
-			positions, normals, texcoords, backTexcoords, vertexColors,
-			indices, packedLight);
-		DRAWS.add(new QueuedDraw(base, material.doubleSided ? BASE_DOUBLE_SIDED : BASE_CULL,
-			material, frame));
-		if (material.outline && material.outlineWidth > 0.0F) {
-			DRAWS.add(new QueuedDraw(base, OUTLINE, material, frame));
+			positions, normals, tangents, smoothNormals, texcoords, backTexcoords, vertexColors, indices);
+		ToonShaderModel.Frame viewFrame = new ToonShaderModel.Frame(
+			modelView.transformDirection(new Vector3f(frame.headForward())).normalize(),
+			modelView.transformDirection(new Vector3f(frame.headRight())).normalize(),
+			modelView.transformDirection(new Vector3f(frame.mainLightDirection())).normalize(), frame.night());
+		RenderPipeline basePipeline = material.blend
+			? material.doubleSided ? BLEND_DOUBLE_SIDED : BLEND_CULL
+			: material.doubleSided ? BASE_DOUBLE_SIDED : BASE_CULL;
+		DRAWS.add(new QueuedDraw(base, basePipeline,
+			material, viewFrame, packedLight));
+		if (!material.blend && material.outline && material.outlineWidth > 0.0F) {
+			DRAWS.add(new QueuedDraw(base, OUTLINE, material, viewFrame, packedLight));
 		}
 	}
 
@@ -127,38 +146,48 @@ final class ToonShaderRenderer {
 		}
 		long started = System.nanoTime();
 		try {
-			RenderTarget target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+			Minecraft minecraft = Minecraft.getInstance();
+			RenderTarget target = minecraft.gameRenderer.mainRenderTarget();
 			if (target.getColorTexture() == null || target.getDepthTexture() == null) {
 				return;
 			}
-			ensureSceneCopies(target);
+			if (target.getColorTexture() == failedColorTarget) {
+				return;
+			}
+			if (!ToonShaderPostProcess.prepare(target, PIPELINES)) {
+				return;
+			}
 			var encoder = RenderSystem.getDevice().createCommandEncoder();
-			encoder.copyTextureToTexture(target.getColorTexture(), sceneColor, 0, 0, 0, 0, 0, target.width, target.height);
-			encoder.copyTextureToTexture(target.getDepthTexture(), sceneDepth, 0, 0, 0, 0, 0, target.width, target.height);
-			BUFFER.upload();
-			GpuSampler sceneColorSampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
-			GpuSampler sceneDepthSampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
-			var projectionUniform = PROJECTION_UNIFORMS.writeUniform(new ProjectionUniform(PROJECTION));
-			try (RenderPass pass = encoder.createRenderPass(() -> "MCglTF ToonShader forward pass",
-				target.getColorTextureView(), Optional.empty())) {
-				for (QueuedDraw draw : DRAWS) {
-					StagedVertexBuffer.ExecuteInfo info = BUFFER.getExecuteInfo(draw.draw);
-					if (info == null) {
-						continue;
+			try {
+				BUFFER.upload();
+				GpuSampler sceneDepthSampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+				GpuTextureView sceneDepthView = target.getDepthTextureView();
+				var projectionUniform = PROJECTION_UNIFORMS.writeUniform(new ProjectionUniform(PROJECTION));
+				try (RenderPass pass = encoder.createRenderPass(() -> "MCglTF ToonShader depth prepass",
+					ToonShaderPostProcess.colorView(), Optional.empty(), ToonShaderPostProcess.depthView(),
+					OptionalDouble.of(0.0D))) {
+					for (QueuedDraw draw : DRAWS) {
+						if (draw.pipeline == OUTLINE || draw.material.blend) {
+							continue;
+						}
+						draw(pass, draw, draw.material.doubleSided ? DEPTH_DOUBLE_SIDED : DEPTH_CULL,
+							projectionUniform, sceneDepthView, sceneDepthSampler);
 					}
-					pass.setPipeline(draw.pipeline);
-					RenderSystem.bindDefaultUniforms(pass);
-					pass.setUniform("ToonProjection", projectionUniform);
-					pass.setUniform("ToonMaterial",
-						UNIFORMS.writeUniform(new MaterialUniform(draw.material, draw.frame)));
-					bindMaterial(pass, draw.material);
-					pass.bindTexture("MinecraftLightmap", Minecraft.getInstance().gameRenderer.levelLightmap(),
-						RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-					pass.bindTexture("SceneColor", sceneColorView, sceneColorSampler);
-					pass.bindTexture("SceneDepth", sceneDepthView, sceneDepthSampler);
-					pass.setVertexBuffer(0, info.vertexBuffer().slice());
-					pass.draw(info.indexCount(), 1, info.baseVertex(), 0);
 				}
+				ToonShaderPostProcess.snapshotDepth(encoder);
+				try (RenderPass pass = encoder.createRenderPass(() -> "MCglTF ToonShader HDR pass",
+					ToonShaderPostProcess.colorView(), Optional.of(ToonShaderPostProcess.CLEAR),
+					ToonShaderPostProcess.depthView(), OptionalDouble.empty())) {
+					for (QueuedDraw draw : DRAWS) {
+						draw(pass, draw, draw.pipeline, projectionUniform, sceneDepthView, sceneDepthSampler);
+					}
+				}
+				ToonShaderPostProcess.apply(encoder, target);
+				failedColorTarget = null;
+			} catch (RuntimeException exception) {
+				failedColorTarget = target.getColorTexture();
+				MCglTF.logger.warn("ToonShader render failed; ShaderPack attachments were not used as Toon targets",
+					exception);
 			}
 		} finally {
 			lastRenderNanos = System.nanoTime() - started;
@@ -173,16 +202,38 @@ final class ToonShaderRenderer {
 		return lastRenderNanos;
 	}
 
+	private static void draw(RenderPass pass, QueuedDraw draw, RenderPipeline pipeline,
+		GpuBufferSlice projectionUniform, GpuTextureView sceneDepthView, GpuSampler sceneDepthSampler) {
+		StagedVertexBuffer.ExecuteInfo info = BUFFER.getExecuteInfo(draw.draw);
+		if (info == null) {
+			return;
+		}
+		pass.setPipeline(pipeline);
+		RenderSystem.bindDefaultUniforms(pass);
+		pass.setUniform("ToonProjection", projectionUniform);
+		pass.setUniform("ToonMaterial",
+			UNIFORMS.writeUniform(new MaterialUniform(draw.material, draw.frame, draw.packedLight)));
+		bindMaterial(pass, draw.material);
+		pass.bindTexture("MinecraftLightmap", Minecraft.getInstance().gameRenderer.levelLightmap(),
+			RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+		pass.bindTexture("SceneDepth", sceneDepthView, sceneDepthSampler);
+		pass.bindTexture("ToonDepth", ToonShaderPostProcess.sampledDepthView(), sceneDepthSampler);
+		pass.setVertexBuffer(0, info.vertexBuffer().slice());
+		pass.draw(info.indexCount(), 1, info.baseVertex(), 0);
+	}
+
 	static void close() {
 		DRAWS.clear();
 		BUFFER.close();
 		UNIFORMS.close();
 		PROJECTION_UNIFORMS.close();
-		closeSceneCopies();
+		failedColorTarget = null;
+		ToonShaderPostProcess.close();
 	}
 
 	private static void bindMaterial(RenderPass pass, Material material) {
 		bind(pass, "BaseTexture", material.baseTexture);
+		bind(pass, "AlphaTexture", material.alphaTexture);
 		bind(pass, "ShadeTexture", material.shadeTexture);
 		bind(pass, "NormalTexture", material.normalTexture);
 		bind(pass, "EmissionTexture", material.emissionTexture);
@@ -190,7 +241,8 @@ final class ToonShaderRenderer {
 		bind(pass, "RimTexture", material.rimTexture);
 		bind(pass, "OutlineWidthTexture", material.outlineWidthTexture);
 		bind(pass, "LightMapTexture", material.lightMapTexture);
-		bind(pass, "FaceMapTexture", material.faceMapTexture);
+		bind(pass, "FaceLightMapTexture", material.faceLightMapTexture);
+		bind(pass, "FaceShadowTexture", material.faceShadowTexture);
 		bind(pass, "RampTexture", material.rampTexture);
 	}
 
@@ -199,66 +251,63 @@ final class ToonShaderRenderer {
 		pass.bindTexture(name, texture.getTextureView(), texture.getSampler());
 	}
 
-	private static void ensureSceneCopies(RenderTarget target) {
-		if (sceneColor != null && sceneColor.getWidth(0) == target.width && sceneColor.getHeight(0) == target.height
-			&& sceneColor.getFormat() == target.getColorTexture().getFormat()) {
-			return;
-		}
-		closeSceneCopies();
-		sceneColor = RenderSystem.getDevice().createTexture("MCglTF ToonShader scene color", 5,
-			target.getColorTexture().getFormat(), target.width, target.height, 1, 1);
-		sceneDepth = RenderSystem.getDevice().createTexture("MCglTF ToonShader scene depth", 5,
-			target.getDepthTexture().getFormat(), target.width, target.height, 1, 1);
-		sceneColorView = RenderSystem.getDevice().createTextureView(sceneColor);
-		sceneDepthView = RenderSystem.getDevice().createTextureView(sceneDepth);
-	}
-
-	private static void closeSceneCopies() {
-		if (sceneColorView != null) {
-			sceneColorView.close();
-			sceneColorView = null;
-		}
-		if (sceneDepthView != null) {
-			sceneDepthView.close();
-			sceneDepthView = null;
-		}
-		if (sceneColor != null) {
-			sceneColor.close();
-			sceneColor = null;
-		}
-		if (sceneDepth != null) {
-			sceneDepth.close();
-			sceneDepth = null;
-		}
-	}
-
 	private static void emit(VertexConsumer consumer, Matrix4f positionTransform, Matrix3f normalTransform,
-		float[] positions, float[] normals, float[] texcoords, float[] backTexcoords, int[] colors,
-		int[] indices, int packedLight) {
+		float[] positions, float[] normals, float[] tangents, float[] smoothNormals, float[] texcoords,
+		float[] backTexcoords, int[] colors, int[] indices) {
 		Vector3f transformedPosition = new Vector3f();
 		Vector3f transformedNormal = new Vector3f();
+		Vector3f transformedTangent = new Vector3f();
+		Vector3f bitangent = new Vector3f();
+		Vector3f transformedSmooth = new Vector3f();
 		for (int i = 0; i < indices.length; i += 3) {
 			emitVertex(consumer, positionTransform, normalTransform, transformedPosition, transformedNormal,
-				positions, normals, texcoords, backTexcoords, colors, indices[i], packedLight);
+				transformedTangent, bitangent, transformedSmooth, positions, normals, tangents, smoothNormals,
+				texcoords, backTexcoords, colors, indices[i]);
 			emitVertex(consumer, positionTransform, normalTransform, transformedPosition, transformedNormal,
-				positions, normals, texcoords, backTexcoords, colors,
-				indices[i + 1], packedLight);
+				transformedTangent, bitangent, transformedSmooth, positions, normals, tangents, smoothNormals,
+				texcoords, backTexcoords, colors, indices[i + 1]);
 			emitVertex(consumer, positionTransform, normalTransform, transformedPosition, transformedNormal,
-				positions, normals, texcoords, backTexcoords, colors,
-				indices[i + 2], packedLight);
+				transformedTangent, bitangent, transformedSmooth, positions, normals, tangents, smoothNormals,
+				texcoords, backTexcoords, colors, indices[i + 2]);
 		}
 	}
 
 	private static void emitVertex(VertexConsumer consumer, Matrix4f positionTransform, Matrix3f normalTransform,
-		Vector3f transformedPosition, Vector3f transformedNormal, float[] positions, float[] normals, float[] texcoords,
-		float[] backTexcoords, int[] colors, int vertex, int packedLight) {
+		Vector3f transformedPosition, Vector3f transformedNormal, Vector3f transformedTangent, Vector3f bitangent,
+		Vector3f transformedSmooth, float[] positions, float[] normals, float[] tangents, float[] smoothNormals,
+		float[] texcoords, float[] backTexcoords, int[] colors, int vertex) {
 		int p = vertex * 3;
+		int tangent = vertex * 4;
 		int uv = vertex * 2;
 		positionTransform.transformPosition(positions[p], positions[p + 1], positions[p + 2], transformedPosition);
 		normalTransform.transform(normals[p], normals[p + 1], normals[p + 2], transformedNormal).normalize();
-		consumer.addVertex(transformedPosition.x, transformedPosition.y, transformedPosition.z, colors[vertex],
-			texcoords[uv], texcoords[uv + 1], packUv(backTexcoords[uv], backTexcoords[uv + 1]), packedLight,
-			transformedNormal.x, transformedNormal.y, transformedNormal.z);
+		positionTransform.transformDirection(tangents[tangent], tangents[tangent + 1], tangents[tangent + 2],
+			transformedTangent);
+		transformedTangent.fma(-transformedTangent.dot(transformedNormal), transformedNormal);
+		if (transformedTangent.lengthSquared() <= 1.0E-12F) {
+			orthogonal(transformedNormal, transformedTangent);
+		} else {
+			transformedTangent.normalize();
+		}
+		transformedNormal.cross(transformedTangent, bitangent).mul(tangents[tangent + 3]);
+		transformedSmooth.set(transformedTangent).mul(smoothNormals[p]).fma(smoothNormals[p + 1], bitangent)
+			.fma(smoothNormals[p + 2], transformedNormal).normalize();
+		consumer.addVertex(transformedPosition.x, transformedPosition.y, transformedPosition.z)
+			.setColor(colors[vertex])
+			.setUv(texcoords[uv], texcoords[uv + 1])
+			.setOverlay(packUv(backTexcoords[uv], backTexcoords[uv + 1]))
+			.setLight(ToonShaderVertexPacking.packTangent(transformedTangent, tangents[tangent + 3]))
+			.setNormal(transformedNormal.x, transformedNormal.y, transformedNormal.z)
+			.setLineWidth(Float.intBitsToFloat(ToonShaderVertexPacking.packSmoothNormal(transformedSmooth)));
+	}
+
+	private static void orthogonal(Vector3f normal, Vector3f output) {
+		if (Math.abs(normal.x) < Math.abs(normal.z)) {
+			output.set(0.0F, -normal.z, normal.y);
+		} else {
+			output.set(-normal.y, normal.x, 0.0F);
+		}
+		output.normalize();
 	}
 
 	private static int packUv(float u, float v) {
@@ -269,7 +318,8 @@ final class ToonShaderRenderer {
 		return Math.round(Math.max(-1.0F, Math.min(1.0F, value)) * 32767.0F);
 	}
 
-	private static RenderPipeline pipeline(String name, boolean outline, boolean cull) {
+	private static RenderPipeline pipeline(String name, boolean outline, boolean depthOnly, boolean cull,
+		boolean writeDepth, boolean blend) {
 		RenderPipeline.Builder builder = RenderPipeline.builder()
 			.withLocation(Identifier.fromNamespaceAndPath(MCglTF.MODID, "pipeline/" + name))
 			.withVertexShader(Identifier.fromNamespaceAndPath(MCglTF.MODID, "core/toon_shader_entity"))
@@ -279,19 +329,31 @@ final class ToonShaderRenderer {
 			.withBindGroupLayout(BindGroupLayouts.GLOBALS)
 			.withBindGroupLayout(PROJECTION_LAYOUT)
 			.withBindGroupLayout(MATERIAL_LAYOUT)
-			.withVertexBinding(0, VERTEX_FORMAT)
-			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-			.withCull(cull);
+				.withVertexBinding(0, VERTEX_FORMAT)
+				.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+				.withDepthStencilState(outline ? DepthStencilState.DEFAULT
+					: new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth, 0.0F, 128.0F))
+				.withCull(cull);
 		if (outline) {
 			builder.withShaderDefine("TOON_SHADER_OUTLINE");
+		}
+		if (depthOnly) {
+			builder.withShaderDefine("TOON_SHADER_DEPTH_ONLY")
+				.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA16_FLOAT,
+					ColorTargetState.WRITE_NONE));
+		} else {
+			builder.withColorTargetState(new ColorTargetState(
+				blend ? Optional.of(BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA) : Optional.empty(),
+				GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL));
 		}
 		return RenderPipelines.register(builder.build());
 	}
 
-	record Material(Identifier baseTexture, Identifier shadeTexture, Identifier normalTexture,
+	record Material(Identifier baseTexture, Identifier alphaTexture, Identifier shadeTexture, Identifier normalTexture,
 		Identifier emissionTexture, Identifier matcapTexture, Identifier rimTexture,
-		Identifier outlineWidthTexture, Identifier lightMapTexture, Identifier faceMapTexture,
-		Identifier rampTexture, Vector4f shadeColor, Vector4f emissionColor, Vector4f rimColor,
+		Identifier outlineWidthTexture, Identifier lightMapTexture, Identifier faceLightMapTexture,
+		Identifier faceShadowTexture,
+		Identifier rampTexture, Vector4f baseColor, Vector4f shadeColor, Vector4f emissionColor, Vector4f rimColor,
 		Vector4f outlineColor1, Vector4f outlineColor2, Vector4f outlineColor3,
 		Vector4f outlineColor4, Vector4f outlineColor5, Vector4f blushColor, Vector4f screenOffset,
 		float shadeShift, float shadingToony,
@@ -301,22 +363,24 @@ final class ToonShaderRenderer {
 		float rimIntensity, float rimPower, float outlineWidth, float outlineDistanceNear,
 		float outlineDistanceFar, float outlineScaleNear, float outlineScaleFar,
 		float outlineZOffset, float outlineLightingMix,
-		float faceShadowStrength, float faceShadowOffset, float blushIntensity, float alphaCutoff, boolean face,
+		float faceShadowStrength, float faceShadowOffset, float blushIntensity, float alphaCutoff, float normalScale, boolean face,
 		boolean metallic, boolean outline, boolean outlineScreenSpace, boolean outlineVertexAlpha,
-		boolean backUv, boolean doubleSided) {
+		boolean backUv, boolean directionalFaceSdf, boolean legacyFaceInputs, boolean textureAlpha, boolean blend, boolean doubleSided,
+		boolean profiled) {
 	}
 
 	private record QueuedDraw(StagedVertexBuffer.Draw draw, RenderPipeline pipeline, Material material,
-		ToonShaderModel.Frame frame) {
+		ToonShaderModel.Frame frame, int packedLight) {
 	}
 
-	private record MaterialUniform(Material material, ToonShaderModel.Frame frame)
+	private record MaterialUniform(Material material, ToonShaderModel.Frame frame, int packedLight)
 		implements DynamicUniformStorage.DynamicUniform {
 		@Override
 		public void write(java.nio.ByteBuffer buffer) {
 			Material m = material;
 			ToonShaderModel.Frame f = frame;
 			Std140Builder.intoBuffer(buffer)
+				.putVec4(m.baseColor)
 				.putVec4(m.shadeColor)
 				.putVec4(m.emissionColor)
 				.putVec4(m.rimColor)
@@ -331,16 +395,20 @@ final class ToonShaderRenderer {
 				.putVec4(m.giEqualization, m.materialType, m.nonMetalSpecular, m.metalSpecular)
 				.putVec4(m.specularShininess, m.emissionIntensity, m.metallic ? 1.0F : 0.0F, m.face ? 1.0F : 0.0F)
 				.putVec4(m.rimOffset, m.rimThreshold, m.rimIntensity, m.rimPower)
-				.putVec4(m.outlineWidth, m.outlineZOffset, m.outlineLightingMix, 0.0F)
+					.putVec4(m.outlineWidth, m.outlineZOffset, m.outlineLightingMix,
+						m.textureAlpha ? 1.0F : 0.0F)
 				.putVec4(m.outlineDistanceNear, m.outlineDistanceFar, m.outlineScaleNear, m.outlineScaleFar)
-				.putVec4(m.faceShadowStrength, m.faceShadowOffset, m.blushIntensity, 0.0F)
+					.putVec4(m.faceShadowStrength, m.faceShadowOffset, m.blushIntensity,
+						m.legacyFaceInputs ? 1.0F : 0.0F)
 				.putVec4(m.alphaCutoff, m.outlineScreenSpace ? 1.0F : 0.0F,
 					m.outlineVertexAlpha ? 1.0F : 0.0F, m.backUv ? 1.0F : 0.0F)
-				.putVec4(m.doubleSided ? 1.0F : 0.0F, f.night(), 0.0F, 0.0F)
-				.putVec4(f.headForward().x, f.headForward().y, f.headForward().z, 0.0F)
-				.putVec4(f.headRight().x, f.headRight().y, f.headRight().z, 0.0F)
-				.putVec4(f.lightDirectionMultiplier().x, f.lightDirectionMultiplier().y,
-					f.lightDirectionMultiplier().z, 0.0F);
+				.putVec4(m.doubleSided ? 1.0F : 0.0F, f.night(), packedLight & 0xFFFF,
+					packedLight >>> 16 & 0xFFFF)
+				.putVec4(f.headForward().x, f.headForward().y, f.headForward().z, m.profiled ? 1.0F : 0.0F)
+				.putVec4(f.headRight().x, f.headRight().y, f.headRight().z,
+					m.directionalFaceSdf ? 1.0F : 0.0F)
+					.putVec4(f.mainLightDirection().x, f.mainLightDirection().y,
+						f.mainLightDirection().z, m.normalScale);
 		}
 	}
 

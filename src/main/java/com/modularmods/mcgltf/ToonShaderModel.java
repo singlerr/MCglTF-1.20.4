@@ -12,33 +12,40 @@ import com.mojang.blaze3d.vertex.PoseStack;
 
 import de.javagl.jgltf.model.GltfModel;
 import de.javagl.jgltf.model.MaterialModel;
+import de.javagl.jgltf.model.MeshPrimitiveModel;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 
 final class ToonShaderModel {
 	private final ToonShaderProfile profile;
 	private final Map<MaterialModel, ToonShaderProfile.MaterialOverride> materials = new IdentityHashMap<>();
+	private final Map<MeshPrimitiveModel, ToonShaderProfile.MaterialOverride> primitives = new IdentityHashMap<>();
 	private Identifier ramp;
 	private Identifier defaultLightMap;
-	private Identifier defaultFaceMap;
+	private Identifier defaultFaceTexture;
 
 	private ToonShaderModel(GltfModel model, Path profilePath) {
 		profile = ToonShaderProfile.load(model, profilePath);
 		profile.materials.forEach((index, material) -> materials.put(model.getMaterialModels().get(index), material));
+		primitives.putAll(profile.primitives);
 	}
 
 	static ToonShaderModel load(GltfModel model, Path profilePath) {
 		return new ToonShaderModel(model, profilePath);
 	}
 
-	boolean applies(MaterialModel material, RenderedGltfModel.MToonProfile mtoon) {
-		return mtoon.enabled() || materials.containsKey(material);
+	boolean applies(MeshPrimitiveModel primitive, MaterialModel material, RenderedGltfModel.MToonProfile mtoon) {
+		return mtoon.enabled() || primitives.containsKey(primitive) || materials.containsKey(material);
 	}
 
-	ToonShaderMaterial material(MaterialModel material, RenderedGltfModel.TextureRegistry textures,
+	ToonShaderMaterial material(MeshPrimitiveModel primitive, MaterialModel material,
+		RenderedGltfModel.TextureRegistry textures,
 		RenderedGltfModel.MToonProfile mtoon, ToonShaderMaterial.Inputs inputs) {
-		return applies(material, mtoon)
-			? ToonShaderMaterial.create(this, textures, mtoon, materials.get(material), inputs) : null;
+		ToonShaderProfile.MaterialOverride override = primitives.getOrDefault(primitive, materials.get(material));
+		return applies(primitive, material, mtoon)
+			? ToonShaderMaterial.create(this, textures, mtoon, override, inputs) : null;
 	}
 
 	Frame frame(PoseStack poseStack, RenderedGltfModel.FrameSnapshots snapshots) {
@@ -51,7 +58,21 @@ final class ToonShaderModel {
 		Minecraft minecraft = Minecraft.getInstance();
 		float night = minecraft.level == null ? 0.0F
 			: Math.max(0.0F, Math.min(1.0F, minecraft.level.getSkyDarken() / 15.0F));
-		return new Frame(forward, right, new Vector3f(profile.lightDirectionMultiplier), night);
+		Vector3f mainLight = new Vector3f(0.0F, 1.0F, 0.0F);
+		if (minecraft.level != null && minecraft.gameRenderer.mainCamera().isInitialized()) {
+			float partialTick = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+			var probe = minecraft.gameRenderer.mainCamera().attributeProbe();
+			Vector3f sun = celestialDirection(probe.getValue(EnvironmentAttributes.SUN_ANGLE, partialTick));
+			Vector3f moon = celestialDirection(probe.getValue(EnvironmentAttributes.MOON_ANGLE, partialTick));
+			mainLight.set(sun.y >= moon.y ? sun : moon);
+		}
+		mainLight.mul(profile.lightDirectionMultiplier).normalize();
+		return new Frame(forward, right, mainLight, night);
+	}
+
+	static Vector3f celestialDirection(float degrees) {
+		float radians = degrees * Mth.DEG_TO_RAD;
+		return new Vector3f(-Mth.sin(radians), Mth.cos(radians), 0.0F);
 	}
 
 	Identifier ramp(RenderedGltfModel.TextureRegistry textures) {
@@ -69,11 +90,27 @@ final class ToonShaderModel {
 		return defaultLightMap;
 	}
 
-	Identifier defaultFaceMap(RenderedGltfModel.TextureRegistry textures) {
-		if (defaultFaceMap == null) {
-			defaultFaceMap = textures.solid(0x0000FFFF);
+	Identifier defaultFaceTexture(RenderedGltfModel.TextureRegistry textures) {
+		if (defaultFaceTexture == null) {
+			defaultFaceTexture = textures.white();
 		}
-		return defaultFaceMap;
+		return defaultFaceTexture;
+	}
+
+	boolean officialFaceInputs() {
+		return profile.version >= 2;
+	}
+
+	boolean allowGeneratedSmoothNormals() {
+		return profile.generateSmoothNormals;
+	}
+
+	float smoothNormalCosine() {
+		return profile.smoothNormalCosine;
+	}
+
+	float baseColorScale() {
+		return profile.baseColorScale;
 	}
 
 	private static NativeImage defaultRamp() {
@@ -93,6 +130,6 @@ final class ToonShaderModel {
 		return image;
 	}
 
-	record Frame(Vector3f headForward, Vector3f headRight, Vector3f lightDirectionMultiplier, float night) {
+	record Frame(Vector3f headForward, Vector3f headRight, Vector3f mainLightDirection, float night) {
 	}
 }

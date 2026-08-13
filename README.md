@@ -58,25 +58,32 @@ The controls travel in the generated shade texture alpha, which the managed pass
 When Iris has an active ShaderPack, ordinary MCglTF callers still use its standard entity pass and never enter the
 ToonShader renderer. ToonShader is opt-in: construct `RenderedGltfModel` with a sidecar path, submit
 `RenderedGltfModel.MTOON_OVERLAY_REQUEST`, capture the world projection with `ToonShader.captureProjection`, and call
-`ToonShader.renderFrame()` after Iris finishes its final pass. The optional renderer then composites only those model
-primitives against copied scene color/depth; it does not transform ShaderPack GLSL or write unknown G-buffer attachments.
+`ToonShader.renderFrame()` after Iris finishes its final pass. The optional renderer shades those model primitives in
+its own HDR color/depth targets, depth-tests them against the scene, then premultiplied-composites the result. It does
+not transform ShaderPack GLSL or write unknown G-buffer attachments.
 
 ### Optional ToonShader sidecar
 
-The sidecar is JSON version 1 and normally sits beside the model as `model.vrm.toon.json`. PNG paths are relative to
-that file and must stay in the same directory tree. Invalid material/node references, traversal, non-PNG textures,
-profiles over 1 MiB, or textures over 64 MiB fail model preparation instead of guessing.
+The sidecar is JSON version 2 (version 1 remains supported) and normally sits beside the model as
+`model.vrm.toon.json`. PNG paths are relative to that file and must stay in the same directory tree. Invalid
+material/node/primitive references, traversal, non-PNG textures, profiles over 1 MiB, or textures over 64 MiB fail
+model preparation instead of guessing.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "head": {"name": "Head", "forward": [0, 0, -1], "right": [1, 0, 0]},
   "lightDirectionMultiplier": [1, 0.55, 1],
+  "baseColorScale": 0.65,
+  "smoothNormals": "generate",
+  "smoothNormalAngle": 180,
   "rampTexture": "avatar-ramp.png",
   "materials": [{
     "index": 2,
     "face": true,
-    "faceMap": "avatar-face-sdf.png",
+    "faceSdfLayout": "directional-rg",
+    "faceLightMap": "avatar-face-light.png",
+    "faceShadow": "avatar-face-shadow.png",
     "lightMap": "avatar-lightmap.png",
     "outline": true,
     "outlineMode": "screen",
@@ -86,8 +93,11 @@ profiles over 1 MiB, or textures over 64 MiB fail model preparation instead of g
 }
 ```
 
-Material entries accept `index` or an unambiguous `name`. Texture inputs are `shadeTexture`, `normalTexture`,
-`emissionTexture`, `matcapTexture`, `rimTexture`, `outlineWidthTexture`, `lightMap`, and `faceMap`. Controls are
+Material entries accept `index` or an unambiguous `name`; `primitives` entries accept a mesh selector plus its
+`primitive` index. Version 2 face entries require separate `faceLightMap` and `faceShadow` textures and may select
+`mirrored-r` or `directional-rg` with `faceSdfLayout`; version 1 retains the packed `faceMap` input. Texture inputs are
+`baseTexture`, `shadeTexture`, `normalTexture`, `emissionTexture`, `matcapTexture`, `rimTexture`,
+`outlineWidthTexture`, `lightMap`, `rampTexture`, `faceMap`, `faceLightMap`, and `faceShadow`. Controls are
 `materialType`, `face`, `metallic`, `outline`, `outlineMode`, `outlineVertexAlpha`, `backUv`, `shadowOffset`,
 `shadowSmoothness`, `nonMetalSpecular`, `metalSpecular`, `specularShininess`, `emissionIntensity`, `rimOffset`,
 `rimThreshold`, `rimIntensity`, `rimPower`, `outlineWidth`, `outlineDistanceNear`, `outlineDistanceFar`,

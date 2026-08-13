@@ -39,7 +39,7 @@ class MToonProfileTest {
 		float[] positions = {1, 2, 3, 1, 2, 3, 1, 2, 3};
 		float[] normals = {1, 0, 0, 0.8F, 0.6F, 0, -1, 0, 0};
 
-		float[] smoothed = RenderedGltfModel.Primitive.smoothSplitNormals(positions, normals);
+		float[] smoothed = RenderedGltfModel.Primitive.smoothSplitNormals(positions, normals, 0.70710677F);
 
 		assertArrayEquals(new float[] {0.9486833F, 0.3162278F, 0},
 			new float[] {smoothed[0], smoothed[1], smoothed[2]}, 1.0E-6F);

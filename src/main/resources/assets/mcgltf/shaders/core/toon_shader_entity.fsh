@@ -1,20 +1,21 @@
 #version 330
 
-#moj_import <minecraft:light.glsl>
-
 uniform sampler2D BaseTexture;
+uniform sampler2D AlphaTexture;
 uniform sampler2D ShadeTexture;
 uniform sampler2D NormalTexture;
 uniform sampler2D EmissionTexture;
 uniform sampler2D MatcapTexture;
 uniform sampler2D RimTexture;
 uniform sampler2D LightMapTexture;
-uniform sampler2D FaceMapTexture;
+uniform sampler2D FaceLightMapTexture;
+uniform sampler2D FaceShadowTexture;
 uniform sampler2D RampTexture;
-uniform sampler2D SceneColor;
 uniform sampler2D SceneDepth;
+uniform sampler2D ToonDepth;
 
 layout(std140) uniform ToonMaterial {
+    vec4 BaseColor;
     vec4 ShadeColor;
     vec4 EmissionColor;
     vec4 RimColor;
@@ -36,7 +37,7 @@ layout(std140) uniform ToonMaterial {
     vec4 Flags2;
     vec4 HeadForward;
     vec4 HeadRight;
-    vec4 LightDirectionMultiplier;
+    vec4 MainLightDirection;
 };
 
 layout(std140) uniform ToonProjection {
@@ -49,8 +50,15 @@ in vec2 texCoord0;
 in vec2 backTexCoord;
 in vec3 viewPosition;
 in vec3 viewNormal;
+in vec4 viewTangent;
 
 out vec4 fragColor;
+
+vec3 srgbToLinear(vec3 color) {
+    vec3 low = color / 12.92;
+    vec3 high = pow((color + 0.055) / 1.055, vec3(2.4));
+    return mix(low, high, step(vec3(0.04045), color));
+}
 
 float linearEyeDepth(float depth) {
     float ndc = depth * 2.0 - 1.0;
@@ -61,35 +69,34 @@ float linearEyeDepth(float depth) {
     return abs(viewZ);
 }
 
-mat3 cotangentFrame(vec3 normal, vec3 position, vec2 uv) {
-    vec3 dp1 = dFdx(position);
-    vec3 dp2 = dFdy(position);
-    vec2 duv1 = dFdx(uv);
-    vec2 duv2 = dFdy(uv);
-    vec3 dp2perp = cross(dp2, normal);
-    vec3 dp1perp = cross(normal, dp1);
-    vec3 tangent = dp2perp * duv1.x + dp1perp * duv2.x;
-    vec3 bitangent = dp2perp * duv1.y + dp1perp * duv2.y;
-    float scale = inversesqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 0.000001));
-    return mat3(tangent * scale, bitangent * scale, normal);
-}
-
 float bodyShadow(vec3 normal, vec3 lightDirection, float ao) {
     float halfLambert = 0.5 * dot(normal, lightDirection) + 0.5;
     float shadow = clamp(2.0 * halfLambert * ao, 0.0, 1.0);
     return mix(shadow, 1.0, step(0.9, ao));
 }
 
-float faceShadow(vec2 uv, vec3 lightDirection, vec4 faceMap) {
+float faceShadow(vec2 uv, vec3 lightDirection) {
     vec3 forward = normalize(HeadForward.xyz);
     vec3 right = normalize(HeadRight.xyz);
+    vec3 up = normalize(cross(right, forward));
+    forward -= up * dot(forward, up);
+    lightDirection -= up * dot(lightDirection, up);
+    forward = length(forward) > 0.0001 ? normalize(forward) : vec3(0.0, 0.0, -1.0);
+    lightDirection = length(lightDirection) > 0.0001 ? normalize(lightDirection) : vec3(0.0);
     float forwardDotLight = dot(forward, lightDirection);
-    float sideDotLight = dot(right, lightDirection);
-    vec2 shadowUv = uv;
-    shadowUv.x = mix(shadowUv.x, 1.0 - shadowUv.x, step(0.0, sideDotLight));
-    float sdf = texture(FaceMapTexture, shadowUv).r;
+    float crossDirection = dot(cross(forward, lightDirection), up);
+    float sdf;
+    if (HeadRight.w > 0.5) {
+        vec2 directionalSdf = texture(FaceLightMapTexture, uv).rg;
+        sdf = mix(directionalSdf.r, directionalSdf.g, step(0.0, crossDirection));
+    } else {
+        vec2 shadowUv = uv;
+        shadowUv.x = mix(shadowUv.x, 1.0 - shadowUv.x, step(0.0, crossDirection));
+        sdf = texture(FaceLightMapTexture, shadowUv).r;
+    }
     float shadow = step(-0.5 * forwardDotLight + 0.5 + FaceParams.y, sdf);
-    return mix(shadow, 1.0, faceMap.g);
+    float forceLit = texture(FaceShadowTexture, uv).a;
+    return mix(shadow, 1.0, forceLit);
 }
 
 float materialRow(float encodedMaterial) {
@@ -107,21 +114,28 @@ vec3 shadowColor(float shadow, float material, float day) {
     float rangeMin = 0.5 + ShadowParams.x - ShadowParams.y;
     float rangeMax = 0.5 + ShadowParams.x;
     vec2 rampUv = vec2(smoothstep(rangeMin, rangeMax, shadow), material / 10.0 + 0.5 * day + 0.05);
-    vec3 ramp = texture(RampTexture, rampUv).rgb;
+    vec3 ramp = srgbToLinear(texture(RampTexture, rampUv).rgb);
     vec3 color = ramp * mix(ShadeColor.rgb, vec3(1.0), smoothstep(0.9, 1.0, rampUv.x));
     return mix(color, vec3(1.0), step(rangeMax, shadow));
 }
 
-vec3 outlineColor(float material) {
-    if (material < 0.5) return OutlineColor1.rgb;
-    if (material < 1.5) return OutlineColor2.rgb;
-    if (material < 2.5) return OutlineColor3.rgb;
-    if (material < 3.5) return OutlineColor4.rgb;
-    return OutlineColor5.rgb;
+vec3 outlineColor(float encodedMaterial, float material) {
+    if (MaterialParams.y >= 0.0) {
+        if (material > 2.5 && material < 3.5) return OutlineColor1.rgb;
+        if (material < 0.5) return OutlineColor2.rgb;
+        if (material > 1.5 && material < 2.5) return OutlineColor3.rgb;
+        if (material > 0.5 && material < 1.5) return OutlineColor4.rgb;
+        return OutlineColor5.rgb;
+    }
+    vec3 color = OutlineColor5.rgb;
+    color = mix(color, OutlineColor4.rgb, step(0.2, encodedMaterial));
+    color = mix(color, OutlineColor3.rgb, step(0.4, encodedMaterial));
+    color = mix(color, OutlineColor2.rgb, step(0.6, encodedMaterial));
+    return mix(color, OutlineColor1.rgb, step(0.8, encodedMaterial));
 }
 
 void main() {
-	ivec2 sceneSize = textureSize(SceneDepth, 0);
+    ivec2 sceneSize = textureSize(SceneDepth, 0);
     vec2 screenUv = gl_FragCoord.xy / vec2(sceneSize);
     float sceneEyeDepth = linearEyeDepth(texture(SceneDepth, screenUv).r);
     float currentEyeDepth = abs(viewPosition.z);
@@ -133,64 +147,85 @@ void main() {
     if (!gl_FrontFacing && Flags2.x > 0.5 && Flags.w > 0.5) {
         uv = backTexCoord;
     }
-    vec4 baseMap = texture(BaseTexture, uv) * vertexColor;
-    if (baseMap.a < Flags.x) {
-        discard;
-    }
-    vec4 lightMap = texture(LightMapTexture, uv);
+	vec4 baseSample = texture(BaseTexture, uv);
+	float alpha = OutlineParams.w > 0.5
+		? texture(AlphaTexture, uv).a * BaseColor.a * vertexColor.a : 1.0;
+	if (alpha < Flags.x) {
+		discard;
+	}
+
+#ifdef TOON_SHADER_DEPTH_ONLY
+	fragColor = vec4(0.0);
+	return;
+#endif
+
+	vec4 lightMap = texture(LightMapTexture, uv);
     float material = materialRow(lightMap.a);
+    bool profiled = HeadForward.w > 0.5;
 
 #ifdef TOON_SHADER_OUTLINE
     if (gl_FrontFacing) {
         discard;
     }
-    vec3 color = outlineColor(material);
-    color *= mix(vec3(1.0), lightMapColor.rgb, OutlineParams.z);
+    vec3 color = outlineColor(lightMap.a, material);
+    if (profiled) {
+        color = srgbToLinear(color);
+    } else {
+        color *= mix(vec3(1.0), lightMapColor.rgb, OutlineParams.z);
+    }
     fragColor = vec4(color, 1.0);
     return;
 #endif
 
-    vec3 normal = normalize(viewNormal);
+	vec3 normal = normalize(viewNormal);
+    vec3 tangent = normalize(viewTangent.xyz - normal * dot(normal, viewTangent.xyz));
+    vec3 bitangent = normalize(cross(normal, tangent)) * viewTangent.w;
     vec3 mappedNormal = texture(NormalTexture, uv).xyz * 2.0 - 1.0;
-    normal = normalize(cotangentFrame(normal, viewPosition, uv) * mappedNormal);
-    vec3 viewDirection = normalize(-viewPosition);
-    vec3 combinedLight = (Light0_Direction + Light1_Direction) * LightDirectionMultiplier.xyz;
-    vec3 lightDirection = length(combinedLight) > 0.0001 ? normalize(combinedLight) : vec3(0.0, 1.0, 0.0);
-    vec4 faceMap = texture(FaceMapTexture, uv);
-    bool facePixel = SpecularParams.w > 0.5 && faceMap.a > 0.001;
+    mappedNormal.xy *= MainLightDirection.w;
+    normal = normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
+	vec3 viewDirection = normalize(-viewPosition);
+	vec3 lightDirection = normalize(MainLightDirection.xyz);
+	bool facePixel = SpecularParams.w > 0.5;
     float shadow = facePixel
-        ? faceShadow(uv, lightDirection, faceMap)
-        : bodyShadow(normal, lightDirection, lightMap.g);
+        ? faceShadow(uv, lightDirection)
+        : bodyShadow(normal, lightDirection, lightMap.g * vertexColor.r);
     if (facePixel) {
         shadow = mix(1.0, shadow, FaceParams.x);
     }
-    vec3 albedo = baseMap.rgb;
-    if (facePixel) {
-        albedo = mix(albedo, BlushColor.rgb, FaceParams.z * faceMap.b);
-    }
-    vec3 shadeAlbedo = texture(ShadeTexture, uv).rgb * vertexColor.rgb;
-    vec3 shaded = mix(shadeAlbedo, albedo, shadow) * shadowColor(shadow, material, 1.0 - Flags2.y);
+
+	vec3 vertexTint = profiled ? vec3(1.0) : vertexColor.rgb;
+	vec3 albedo = srgbToLinear(baseSample.rgb) * BaseColor.rgb * vertexTint;
+	if (facePixel) {
+		float blushMask = FaceParams.w > 0.5 ? texture(FaceLightMapTexture, uv).b : baseSample.a;
+		albedo = mix(albedo, srgbToLinear(BlushColor.rgb), FaceParams.z * blushMask);
+	}
+	vec3 rampColor = shadowColor(shadow, material, 1.0 - Flags2.y);
+	vec3 shadeAlbedo = srgbToLinear(texture(ShadeTexture, uv).rgb) * BaseColor.rgb * vertexTint;
+    vec3 shaded = profiled ? albedo * rampColor : mix(shadeAlbedo, albedo, shadow) * rampColor;
 
     vec3 halfDirection = normalize(lightDirection + viewDirection);
     float blinnPhong = pow(max(dot(normal, halfDirection), 0.0), max(SpecularParams.x, 0.0001));
-    vec3 matcap = texture(MatcapTexture, normal.xy * 0.5 + 0.5).rgb;
+    vec3 matcap = srgbToLinear(texture(MatcapTexture, normal.xy * 0.5 + 0.5).rgb);
     vec3 nonMetallic = vec3(step(1.1, lightMap.b + blinnPhong) * lightMap.r * MaterialParams.z);
     vec3 metallic = blinnPhong * lightMap.b * albedo * matcap * MaterialParams.w;
     float metalSelector = max(step(0.9, lightMap.r), SpecularParams.z);
     vec3 specular = mix(nonMetallic, metallic, metalSelector);
 
-    vec3 emissionMask = texture(EmissionTexture, uv).rgb * EmissionColor.rgb;
-    vec3 emission = albedo * SpecularParams.y * baseMap.a * emissionMask;
+	vec3 emissionSample = srgbToLinear(texture(EmissionTexture, uv).rgb);
+	vec3 emissionMask = emissionSample * EmissionColor.rgb;
+	vec3 emission = albedo * SpecularParams.y
+		* (profiled ? vec3(emissionSample.r) : baseSample.a * emissionMask);
 
-    vec2 rimUv = clamp(screenUv + vec2(RimParams.x * normal.x / float(sceneSize.x), 0.0),
-        vec2(0.0), vec2(1.0));
-    float offsetEyeDepth = linearEyeDepth(texture(SceneDepth, rimUv).r);
-    float depthRim = smoothstep(0.0, max(RimParams.y, 0.0001), offsetEyeDepth - currentEyeDepth) * RimParams.z;
+	vec2 rimUv = clamp(screenUv + vec2(RimParams.x * normal.x / float(sceneSize.x), 0.0),
+		vec2(0.0), vec2(1.0));
+	float toonEyeDepth = linearEyeDepth(texture(ToonDepth, screenUv).r);
+	float offsetEyeDepth = linearEyeDepth(texture(ToonDepth, rimUv).r);
+	float depthRim = smoothstep(0.0, max(RimParams.y, 0.0001), offsetEyeDepth - toonEyeDepth) * RimParams.z;
     float fresnel = pow(clamp(1.0 - dot(normal, viewDirection), 0.0, 1.0), max(RimParams.w, 0.0001));
-    vec3 rim = albedo * depthRim * fresnel * texture(RimTexture, uv).r * RimColor.rgb;
+    vec3 rimMask = profiled ? vec3(1.0) : texture(RimTexture, uv).rrr * RimColor.rgb;
+    vec3 rim = albedo * depthRim * fresnel * rimMask;
 
     vec3 ambient = mix(lightMapColor.rgb, vec3(1.0), clamp(MaterialParams.x, 0.0, 1.0));
-    vec3 finalColor = shaded * ambient + specular + rim + emission;
-    vec3 sceneColor = texture(SceneColor, screenUv).rgb;
-    fragColor = vec4(mix(sceneColor, finalColor, baseMap.a), 1.0);
+    vec3 finalColor = shaded * (profiled ? vec3(1.0) : ambient) + specular + rim + emission;
+    fragColor = vec4(finalColor * alpha, alpha);
 }

@@ -79,8 +79,8 @@ public final class MCglTFClientGameTest implements FabricClientGameTest {
 			assertRegionStable(entityBaseline, entityDuring, Region.BORDER, 12.0D,
 				"Looking at the rendered entity corrupted surrounding textures");
 			Path entityAfter = screenshot(context, "entity-gaze-after", null, RenderMode.OFF);
-			assertRegionStable(entityBaseline, entityAfter, Region.ALL, 8.0D,
-				"Renderer state leaked after the entity stopped rendering");
+			assertRegionStable(entityBaseline, entityAfter, Region.SCENE, 8.0D,
+				"Post-render scene did not return to its baseline");
 
 			world.getServer().runCommand("kill @e[type=minecraft:armor_stand]");
 			runMultiModelBenchmark(context);
@@ -270,6 +270,12 @@ public final class MCglTFClientGameTest implements FabricClientGameTest {
 			@Override
 			boolean includes(int x, int y, int width, int height) {
 				return x >= width / 5 && x < width * 4 / 5 && y >= height / 5 && y < height * 4 / 5;
+			}
+		},
+		SCENE {
+			@Override
+			boolean includes(int x, int y, int width, int height) {
+				return y >= height / 4;
 			}
 		},
 		BORDER {

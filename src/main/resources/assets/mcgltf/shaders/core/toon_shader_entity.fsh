@@ -38,6 +38,8 @@ layout(std140) uniform ToonMaterial {
     vec4 HeadForward;
     vec4 HeadRight;
     vec4 MainLightDirection;
+    mat4 ToonModelViewMatrix;
+    mat4 ToonNormalMatrix;
 };
 
 layout(std140) uniform ToonProjection {

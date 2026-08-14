@@ -24,7 +24,11 @@ vec3 officialDisplay(vec3 color) {
 void main() {
 	vec4 toon = texture(ToonHdr, texCoord);
 	float coverage = clamp(toon.a, 0.0, 1.0);
+#ifdef TOON_NO_BLOOM
+	vec4 bloomSample = vec4(0.0);
+#else
 	vec4 bloomSample = texture(BloomTexture, texCoord);
+#endif
 	if (max(coverage, bloomSample.a) <= 0.000001) {
 		discard;
 	}

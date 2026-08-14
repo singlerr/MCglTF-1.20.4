@@ -56,8 +56,11 @@ final class ToonShaderPostProcess {
 		UPSAMPLE_LAYOUT, GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL, false);
 	private static final RenderPipeline RESOLVE = pipeline("toon_post_resolve", "toon_post_resolve",
 		RESOLVE_LAYOUT, GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_COLOR, true);
+	private static final RenderPipeline RESOLVE_WITHOUT_BLOOM = pipeline("toon_post_resolve_without_bloom",
+		"toon_post_resolve", RESOLVE_LAYOUT, GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_COLOR, true,
+		"TOON_NO_BLOOM");
 	private static final RenderPipeline[] PIPELINES = {PREFILTER, BLUR_HORIZONTAL_1X, BLUR_HORIZONTAL_2X,
-		BLUR_VERTICAL_1X, UPSAMPLE, RESOLVE};
+		BLUR_VERTICAL_1X, UPSAMPLE, RESOLVE, RESOLVE_WITHOUT_BLOOM};
 
 	private static GpuTexture toonHdr;
 	private static GpuTextureView toonHdrView;
@@ -157,6 +160,10 @@ final class ToonShaderPostProcess {
 
 	static void apply(CommandEncoder encoder, RenderTarget target) {
 		GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+		if (!ToonShader.isBloomEnabled()) {
+			compositePass(encoder, target, "post resolve without bloom", RESOLVE_WITHOUT_BLOOM, linear);
+			return;
+		}
 		sourcePass(encoder, "prefilter", bloomAViews[0], PREFILTER, toonHdrView, linear);
 		blurPass(encoder, "horizontal 1x", bloomBViews[0], BLUR_HORIZONTAL_1X, bloomAViews[0], linear);
 		blurPass(encoder, "vertical 1x", bloomAViews[0], BLUR_VERTICAL_1X, bloomBViews[0], linear);

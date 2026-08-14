@@ -42,6 +42,7 @@ import net.minecraft.client.renderer.StagedVertexBuffer;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
+import net.irisshaders.iris.vertices.ImmediateState;
 
 final class ToonShaderRenderer {
 	private static final VertexFormat VERTEX_FORMAT = VertexFormat.builder(0)
@@ -57,7 +58,7 @@ final class ToonShaderRenderer {
 		.putVec4().putVec4().putVec4().putVec4().putVec4().putVec4()
 		.putVec4().putVec4().putVec4().putVec4().putVec4().putVec4()
 		.putVec4().putVec4().putVec4().putVec4().putVec4().putVec4()
-		.putVec4().putVec4().putVec4().putVec4().putVec4().get();
+		.putVec4().putVec4().putVec4().putVec4().putVec4().putMat4f().putMat4f().get();
 	private static final int PROJECTION_UBO_SIZE = new Std140SizeCalculator().putMat4f().get();
 	private static final BindGroupLayout PROJECTION_LAYOUT = BindGroupLayout.builder()
 		.withUniform("ToonProjection", UniformType.UNIFORM_BUFFER)
@@ -123,9 +124,15 @@ final class ToonShaderRenderer {
 		StagedVertexBuffer.Draw base = BUFFER.appendDraw(VERTEX_FORMAT, PrimitiveTopology.TRIANGLES);
 		Matrix4f modelView = RenderSystem.getModelViewMatrixCopy();
 		Matrix4f positionTransform = new Matrix4f(modelView).mul(pose.pose());
-		Matrix3f normalTransform = new Matrix3f(modelView).mul(pose.normal());
-		emit(BUFFER.getVertexBuilder(base), positionTransform, normalTransform,
-			positions, normals, tangents, smoothNormals, texcoords, backTexcoords, vertexColors, indices);
+		Matrix4f normalTransform = new Matrix4f().set(new Matrix3f(modelView).mul(pose.normal()));
+		Boolean skipExtension = ImmediateState.skipExtension.get();
+		try {
+			ImmediateState.skipExtension.set(true);
+			emit(BUFFER.getVertexBuilder(base), positions, normals, tangents, smoothNormals,
+				texcoords, backTexcoords, vertexColors, indices);
+		} finally {
+			ImmediateState.skipExtension.set(skipExtension);
+		}
 		ToonShaderModel.Frame viewFrame = new ToonShaderModel.Frame(
 			modelView.transformDirection(new Vector3f(frame.headForward())).normalize(),
 			modelView.transformDirection(new Vector3f(frame.headRight())).normalize(),
@@ -134,9 +141,10 @@ final class ToonShaderRenderer {
 			? material.doubleSided ? BLEND_DOUBLE_SIDED : BLEND_CULL
 			: material.doubleSided ? BASE_DOUBLE_SIDED : BASE_CULL;
 		DRAWS.add(new QueuedDraw(base, basePipeline,
-			material, viewFrame, packedLight));
+			material, viewFrame, packedLight, positionTransform, normalTransform));
 		if (!material.blend && material.outline && material.outlineWidth > 0.0F) {
-			DRAWS.add(new QueuedDraw(base, OUTLINE, material, viewFrame, packedLight));
+			DRAWS.add(new QueuedDraw(base, OUTLINE, material, viewFrame, packedLight,
+				positionTransform, normalTransform));
 		}
 	}
 
@@ -212,7 +220,8 @@ final class ToonShaderRenderer {
 		RenderSystem.bindDefaultUniforms(pass);
 		pass.setUniform("ToonProjection", projectionUniform);
 		pass.setUniform("ToonMaterial",
-			UNIFORMS.writeUniform(new MaterialUniform(draw.material, draw.frame, draw.packedLight)));
+			UNIFORMS.writeUniform(new MaterialUniform(draw.material, draw.frame, draw.packedLight,
+				draw.positionTransform, draw.normalTransform)));
 		bindMaterial(pass, draw.material);
 		pass.bindTexture("MinecraftLightmap", Minecraft.getInstance().gameRenderer.levelLightmap(),
 			RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
@@ -251,63 +260,34 @@ final class ToonShaderRenderer {
 		pass.bindTexture(name, texture.getTextureView(), texture.getSampler());
 	}
 
-	private static void emit(VertexConsumer consumer, Matrix4f positionTransform, Matrix3f normalTransform,
-		float[] positions, float[] normals, float[] tangents, float[] smoothNormals, float[] texcoords,
+	private static void emit(VertexConsumer consumer, float[] positions, float[] normals, float[] tangents,
+		float[] smoothNormals, float[] texcoords,
 		float[] backTexcoords, int[] colors, int[] indices) {
-		Vector3f transformedPosition = new Vector3f();
-		Vector3f transformedNormal = new Vector3f();
-		Vector3f transformedTangent = new Vector3f();
-		Vector3f bitangent = new Vector3f();
-		Vector3f transformedSmooth = new Vector3f();
+		Vector3f packedVector = new Vector3f();
 		for (int i = 0; i < indices.length; i += 3) {
-			emitVertex(consumer, positionTransform, normalTransform, transformedPosition, transformedNormal,
-				transformedTangent, bitangent, transformedSmooth, positions, normals, tangents, smoothNormals,
+			emitVertex(consumer, packedVector, positions, normals, tangents, smoothNormals,
 				texcoords, backTexcoords, colors, indices[i]);
-			emitVertex(consumer, positionTransform, normalTransform, transformedPosition, transformedNormal,
-				transformedTangent, bitangent, transformedSmooth, positions, normals, tangents, smoothNormals,
+			emitVertex(consumer, packedVector, positions, normals, tangents, smoothNormals,
 				texcoords, backTexcoords, colors, indices[i + 1]);
-			emitVertex(consumer, positionTransform, normalTransform, transformedPosition, transformedNormal,
-				transformedTangent, bitangent, transformedSmooth, positions, normals, tangents, smoothNormals,
+			emitVertex(consumer, packedVector, positions, normals, tangents, smoothNormals,
 				texcoords, backTexcoords, colors, indices[i + 2]);
 		}
 	}
 
-	private static void emitVertex(VertexConsumer consumer, Matrix4f positionTransform, Matrix3f normalTransform,
-		Vector3f transformedPosition, Vector3f transformedNormal, Vector3f transformedTangent, Vector3f bitangent,
-		Vector3f transformedSmooth, float[] positions, float[] normals, float[] tangents, float[] smoothNormals,
+	private static void emitVertex(VertexConsumer consumer, Vector3f packedVector, float[] positions, float[] normals,
+		float[] tangents, float[] smoothNormals,
 		float[] texcoords, float[] backTexcoords, int[] colors, int vertex) {
 		int p = vertex * 3;
 		int tangent = vertex * 4;
 		int uv = vertex * 2;
-		positionTransform.transformPosition(positions[p], positions[p + 1], positions[p + 2], transformedPosition);
-		normalTransform.transform(normals[p], normals[p + 1], normals[p + 2], transformedNormal).normalize();
-		positionTransform.transformDirection(tangents[tangent], tangents[tangent + 1], tangents[tangent + 2],
-			transformedTangent);
-		transformedTangent.fma(-transformedTangent.dot(transformedNormal), transformedNormal);
-		if (transformedTangent.lengthSquared() <= 1.0E-12F) {
-			orthogonal(transformedNormal, transformedTangent);
-		} else {
-			transformedTangent.normalize();
-		}
-		transformedNormal.cross(transformedTangent, bitangent).mul(tangents[tangent + 3]);
-		transformedSmooth.set(transformedTangent).mul(smoothNormals[p]).fma(smoothNormals[p + 1], bitangent)
-			.fma(smoothNormals[p + 2], transformedNormal).normalize();
-		consumer.addVertex(transformedPosition.x, transformedPosition.y, transformedPosition.z)
-			.setColor(colors[vertex])
-			.setUv(texcoords[uv], texcoords[uv + 1])
-			.setOverlay(packUv(backTexcoords[uv], backTexcoords[uv + 1]))
-			.setLight(ToonShaderVertexPacking.packTangent(transformedTangent, tangents[tangent + 3]))
-			.setNormal(transformedNormal.x, transformedNormal.y, transformedNormal.z)
-			.setLineWidth(Float.intBitsToFloat(ToonShaderVertexPacking.packSmoothNormal(transformedSmooth)));
-	}
-
-	private static void orthogonal(Vector3f normal, Vector3f output) {
-		if (Math.abs(normal.x) < Math.abs(normal.z)) {
-			output.set(0.0F, -normal.z, normal.y);
-		} else {
-			output.set(-normal.y, normal.x, 0.0F);
-		}
-		output.normalize();
+		packedVector.set(tangents[tangent], tangents[tangent + 1], tangents[tangent + 2]);
+		int packedTangent = ToonShaderVertexPacking.packTangent(packedVector, tangents[tangent + 3]);
+		packedVector.set(smoothNormals[p], smoothNormals[p + 1], smoothNormals[p + 2]);
+		int packedSmoothNormal = ToonShaderVertexPacking.packSmoothNormal(packedVector);
+		consumer.addVertex(positions[p], positions[p + 1], positions[p + 2], colors[vertex],
+			texcoords[uv], texcoords[uv + 1], packUv(backTexcoords[uv], backTexcoords[uv + 1]),
+			packedTangent, normals[p], normals[p + 1], normals[p + 2]);
+		consumer.setLineWidth(Float.intBitsToFloat(packedSmoothNormal));
 	}
 
 	private static int packUv(float u, float v) {
@@ -370,10 +350,11 @@ final class ToonShaderRenderer {
 	}
 
 	private record QueuedDraw(StagedVertexBuffer.Draw draw, RenderPipeline pipeline, Material material,
-		ToonShaderModel.Frame frame, int packedLight) {
+		ToonShaderModel.Frame frame, int packedLight, Matrix4f positionTransform, Matrix4f normalTransform) {
 	}
 
-	private record MaterialUniform(Material material, ToonShaderModel.Frame frame, int packedLight)
+	private record MaterialUniform(Material material, ToonShaderModel.Frame frame, int packedLight,
+		Matrix4f positionTransform, Matrix4f normalTransform)
 		implements DynamicUniformStorage.DynamicUniform {
 		@Override
 		public void write(java.nio.ByteBuffer buffer) {
@@ -407,8 +388,10 @@ final class ToonShaderRenderer {
 				.putVec4(f.headForward().x, f.headForward().y, f.headForward().z, m.profiled ? 1.0F : 0.0F)
 				.putVec4(f.headRight().x, f.headRight().y, f.headRight().z,
 					m.directionalFaceSdf ? 1.0F : 0.0F)
-					.putVec4(f.mainLightDirection().x, f.mainLightDirection().y,
-						f.mainLightDirection().z, m.normalScale);
+				.putVec4(f.mainLightDirection().x, f.mainLightDirection().y,
+					f.mainLightDirection().z, m.normalScale)
+				.putMat4f(positionTransform)
+				.putMat4f(normalTransform);
 		}
 	}
 

@@ -4,6 +4,8 @@ import org.joml.Matrix4fc;
 
 /** Entry points for the optional ToonShader renderer. */
 public final class ToonShader {
+	private static volatile boolean bloomEnabled = true;
+
 	private ToonShader() {
 	}
 
@@ -17,5 +19,13 @@ public final class ToonShader {
 
 	public static long getLastRenderNanos() {
 		return ToonShaderRenderer.lastRenderNanos();
+	}
+
+	public static void setBloomEnabled(boolean enabled) {
+		bloomEnabled = enabled;
+	}
+
+	public static boolean isBloomEnabled() {
+		return bloomEnabled;
 	}
 }

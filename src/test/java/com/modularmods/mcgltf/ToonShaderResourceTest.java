@@ -23,14 +23,15 @@ class ToonShaderResourceTest {
 	}
 
 	@Test
-	void consumesViewSpaceVerticesPreparedByTheRenderer() throws Exception {
+	void transformsModelVerticesOnTheGpu() throws Exception {
 		try (var stream = getClass().getResourceAsStream(
 			"/assets/mcgltf/shaders/core/toon_shader_entity.vsh")) {
 			String shader = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-			assertTrue(shader.contains("vec3 position = Position;"));
-			assertTrue(shader.contains("vec3 normal = normalize(Normal);"));
+			assertTrue(shader.contains("ToonModelViewMatrix * vec4(Position, 1.0)"));
+			assertTrue(shader.contains("mat3(ToonNormalMatrix) * Normal"));
 				assertTrue(shader.contains("decodeTangent(UV2)"));
 				assertTrue(shader.contains("decodeSmoothNormal(LineWidth)"));
+				assertTrue(shader.contains("tangentDirection * tangentSmoothNormal.x"));
 				assertTrue(shader.contains("viewNormal = normal;"));
 				assertTrue(shader.contains("outlineLength > 0.0001"));
 				assertTrue(shader.contains("if (Flags.y < 0.5)"));
@@ -38,6 +39,9 @@ class ToonShaderResourceTest {
 				assertTrue(shader.contains("vec2 viewport = vec2(textureSize(SceneDepth, 0))"));
 				assertTrue(shader.contains("200.0 * width * pixelDirection / viewport"));
 				assertFalse(shader.contains("HeadForward.w < 0.5 && Flags.y > 0.5"));
+			String fragment = resource("toon_shader_entity.fsh");
+			assertTrue(fragment.contains("mat4 ToonModelViewMatrix;"));
+			assertTrue(fragment.contains("mat4 ToonNormalMatrix;"));
 		}
 	}
 
@@ -84,6 +88,7 @@ class ToonShaderResourceTest {
 		assertTrue(upsample.contains("* 0.4"));
 		String resolve = resource("toon_post_resolve.fsh");
 			assertTrue(resolve.contains("* 1.5"));
+			assertTrue(resolve.contains("#ifdef TOON_NO_BLOOM"));
 			assertTrue(resolve.contains("color *= 1.05"));
 			assertTrue(resolve.contains("(1.36 * color + 0.047) * color"));
 			assertFalse(resolve.contains("SceneColor"));
@@ -113,6 +118,7 @@ class ToonShaderResourceTest {
 		String postProcess = Files.readString(Path.of(
 			"src/main/java/com/modularmods/mcgltf/ToonShaderPostProcess.java"));
 			assertTrue(postProcess.contains("BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA"));
+			assertTrue(postProcess.contains("if (!ToonShader.isBloomEnabled())"));
 			assertFalse(postProcess.contains("BLOOM_COMPOSITE"));
 			assertTrue(postProcess.contains("color == failedColor && depth == failedDepth"));
 			assertTrue(postProcess.contains("new Vector4f(0.0F, 0.0F, 0.0F, 0.0F)"));

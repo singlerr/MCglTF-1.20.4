@@ -38,6 +38,8 @@ layout(std140) uniform ToonMaterial {
     vec4 HeadForward;
     vec4 HeadRight;
     vec4 MainLightDirection;
+    mat4 ToonModelViewMatrix;
+    mat4 ToonNormalMatrix;
 };
 
 layout(std140) uniform ToonProjection {
@@ -95,10 +97,21 @@ float outlineWidth(float viewZ) {
 }
 
 void main() {
-    vec3 position = Position;
-    vec3 normal = normalize(Normal);
-    vec4 tangent = decodeTangent(UV2);
-    vec3 smoothNormal = decodeSmoothNormal(LineWidth);
+    vec3 position = (ToonModelViewMatrix * vec4(Position, 1.0)).xyz;
+    vec3 normal = normalize(mat3(ToonNormalMatrix) * Normal);
+    vec4 sourceTangent = decodeTangent(UV2);
+    vec3 tangentDirection = mat3(ToonModelViewMatrix) * sourceTangent.xyz;
+    tangentDirection -= normal * dot(normal, tangentDirection);
+    if (dot(tangentDirection, tangentDirection) <= 0.000000000001) {
+        tangentDirection = abs(normal.x) < abs(normal.z)
+            ? vec3(0.0, -normal.z, normal.y) : vec3(-normal.y, normal.x, 0.0);
+    }
+    tangentDirection = normalize(tangentDirection);
+    vec4 tangent = vec4(tangentDirection, sourceTangent.w);
+    vec3 bitangent = cross(normal, tangentDirection) * sourceTangent.w;
+    vec3 tangentSmoothNormal = decodeSmoothNormal(LineWidth);
+    vec3 smoothNormal = normalize(tangentDirection * tangentSmoothNormal.x
+        + bitangent * tangentSmoothNormal.y + normal * tangentSmoothNormal.z);
 #ifdef TOON_SHADER_OUTLINE
     vec2 outlineDirection = smoothNormal.xy;
     float outlineLength = length(outlineDirection);

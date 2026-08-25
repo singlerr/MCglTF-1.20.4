@@ -33,11 +33,10 @@ class ToonShaderResourceTest {
 				assertTrue(shader.contains("decodeSmoothNormal(LineWidth)"));
 				assertTrue(shader.contains("tangentDirection * tangentSmoothNormal.x"));
 				assertTrue(shader.contains("viewNormal = normal;"));
-				assertTrue(shader.contains("outlineLength > 0.0001"));
-				assertTrue(shader.contains("if (Flags.y < 0.5)"));
-				assertTrue(shader.contains("if (Flags.y > 0.5)"));
-				assertTrue(shader.contains("vec2 viewport = vec2(textureSize(SceneDepth, 0))"));
-				assertTrue(shader.contains("200.0 * width * pixelDirection / viewport"));
+				assertTrue(shader.contains("outlineLength <= 0.0001"));
+				assertTrue(shader.contains("outlineWidth(position.z) * vec3(outlineNormal.xy, 0.0)"));
+				assertTrue(shader.contains("if (Flags.y > 0.5 && HeadForward.w < 0.5)"));
+				assertFalse(shader.contains("200.0 * width * pixelDirection / viewport"));
 				assertFalse(shader.contains("HeadForward.w < 0.5 && Flags.y > 0.5"));
 			String fragment = resource("toon_shader_entity.fsh");
 			assertTrue(fragment.contains("mat4 ToonModelViewMatrix;"));
@@ -60,7 +59,7 @@ class ToonShaderResourceTest {
 				assertTrue(shader.contains("mix(directionalSdf.r, directionalSdf.g, step(0.0, crossDirection))"));
 				assertTrue(shader.contains("texture(FaceShadowTexture, uv).a"));
 				assertTrue(shader.contains("texture(AlphaTexture, uv).a"));
-				assertTrue(shader.contains("FaceParams.w > 0.5 ? texture(FaceLightMapTexture, uv).b : baseSample.a"));
+				assertTrue(shader.contains("FaceParams.w > 0.5 ? baseSample.a : texture(FaceLightMapTexture, uv).b"));
 				assertTrue(shader.contains("mappedNormal.xy *= MainLightDirection.w"));
 				assertTrue(shader.contains("color = srgbToLinear(color);"));
 				assertTrue(shader.contains("srgbToLinear(BlushColor.rgb)"));
@@ -108,8 +107,7 @@ class ToonShaderResourceTest {
 	@Test
 	void usesMinecraftReverseZAndBiasForCompositePasses() throws Exception {
 		String renderer = Files.readString(Path.of("src/main/java/com/modularmods/mcgltf/ToonShaderRenderer.java"));
-		assertTrue(renderer.contains(
-			"new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth, 0.0F, 128.0F)"));
+		assertTrue(renderer.contains("outline ? -128.0F : 128.0F"));
 		assertFalse(renderer.contains("new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, false)"));
 		assertFalse(renderer.contains("copyTextureToTexture(target.getDepthTexture()"));
 		assertFalse(renderer.contains("copyTextureToTexture(target.getColorTexture()"));
@@ -139,6 +137,7 @@ class ToonShaderResourceTest {
 	@Test
 	void toleratesBiasedSelfDepthWithoutDisablingForegroundOcclusion() throws Exception {
 		String fragment = resource("toon_shader_entity.fsh");
+		assertTrue(fragment.contains("#ifndef TOON_SHADER_OUTLINE"));
 		assertTrue(fragment.contains(
 			"currentEyeDepth > sceneEyeDepth + max(0.002, currentEyeDepth * 0.002)"));
 	}

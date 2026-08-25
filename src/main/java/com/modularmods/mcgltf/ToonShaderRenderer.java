@@ -311,8 +311,8 @@ final class ToonShaderRenderer {
 			.withBindGroupLayout(MATERIAL_LAYOUT)
 				.withVertexBinding(0, VERTEX_FORMAT)
 				.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-				.withDepthStencilState(outline ? DepthStencilState.DEFAULT
-					: new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth, 0.0F, 128.0F))
+				.withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth,
+					0.0F, outline ? -128.0F : 128.0F))
 				.withCull(cull);
 		if (outline) {
 			builder.withShaderDefine("TOON_SHADER_OUTLINE");

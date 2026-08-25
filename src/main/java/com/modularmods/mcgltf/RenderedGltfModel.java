@@ -1321,7 +1321,7 @@ public class RenderedGltfModel {
 		int toonControl) {
 	}
 
-	private static int[] triangulate(MeshPrimitiveModel primitive, int vertexCount) {
+	static int[] triangulate(MeshPrimitiveModel primitive, int vertexCount) {
 		int[] source;
 		if (primitive.getIndices() == null) {
 			source = new int[vertexCount];

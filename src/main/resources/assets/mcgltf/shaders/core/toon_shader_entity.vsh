@@ -113,29 +113,29 @@ void main() {
     vec3 smoothNormal = normalize(tangentDirection * tangentSmoothNormal.x
         + bitangent * tangentSmoothNormal.y + normal * tangentSmoothNormal.z);
 #ifdef TOON_SHADER_OUTLINE
-    vec2 outlineDirection = smoothNormal.xy;
-    float outlineLength = length(outlineDirection);
-    vec3 outlineNormal = outlineLength > 0.0001
-        ? vec3(outlineDirection / outlineLength, 0.0) : vec3(0.0);
+    // Match UnityGenshinToonShader: expand in view-space XY using the smooth normal
+    // when profiled, but fall back to the geometric normal when the projected
+    // direction degenerates so silhouette tips do not drop out.
+    vec3 outlineSource = HeadForward.w > 0.5 ? smoothNormal : normal;
+    vec3 outlineNormal = outlineSource;
+    outlineNormal.z = 0.0;
+    float outlineLength = length(outlineNormal);
+    if (outlineLength <= 0.0001) {
+        outlineNormal = normal;
+        outlineNormal.z = 0.0;
+        outlineLength = length(outlineNormal);
+    }
+    outlineNormal = outlineLength > 0.0001
+        ? outlineNormal / outlineLength : vec3(0.0, 1.0, 0.0);
     vec3 viewDirection = length(position) > 0.0001 ? normalize(position) : vec3(0.0, 0.0, -1.0);
     position += 0.01 * OutlineParams.y * viewDirection;
-    if (Flags.y < 0.5) {
-        position += outlineWidth(position.z) * outlineNormal;
-    }
+    position += outlineWidth(position.z) * vec3(outlineNormal.xy, 0.0);
 #endif
     gl_Position = ToonProjectionMatrix * vec4(position, 1.0);
 #ifdef TOON_SHADER_OUTLINE
-    if (Flags.y > 0.5) {
+    if (Flags.y > 0.5 && HeadForward.w < 0.5) {
         float width = outlineWidth(position.z);
-        if (HeadForward.w > 0.5) {
-            vec2 viewport = vec2(textureSize(SceneDepth, 0));
-            vec2 pixelDirection = outlineNormal.xy
-                * vec2(ToonProjectionMatrix[0][0], ToonProjectionMatrix[1][1]) * viewport;
-            pixelDirection /= max(length(pixelDirection), 0.0001);
-            gl_Position.xy += 200.0 * width * pixelDirection / viewport * gl_Position.w;
-        } else {
-            gl_Position.xy += 2.0 * width * outlineNormal.xy * gl_Position.w;
-        }
+        gl_Position.xy += 2.0 * width * outlineNormal.xy * gl_Position.w;
     }
     gl_Position.xy += ScreenOffset.zw * gl_Position.w;
 #else

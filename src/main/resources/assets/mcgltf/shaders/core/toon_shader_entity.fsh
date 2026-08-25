@@ -144,11 +144,13 @@ vec3 outlineColor(float encodedMaterial, float material) {
 void main() {
     ivec2 sceneSize = textureSize(SceneDepth, 0);
     vec2 screenUv = gl_FragCoord.xy / vec2(sceneSize);
+#ifndef TOON_SHADER_OUTLINE
     float sceneEyeDepth = linearEyeDepth(texture(SceneDepth, screenUv).r);
     float currentEyeDepth = abs(viewPosition.z);
     if (currentEyeDepth > sceneEyeDepth + max(0.002, currentEyeDepth * 0.002)) {
         discard;
     }
+#endif
 
     vec2 uv = texCoord0;
     if (!gl_FrontFacing && Flags2.x > 0.5 && Flags.w > 0.5) {
@@ -157,9 +159,11 @@ void main() {
 	vec4 baseSample = texture(BaseTexture, uv);
 	float alpha = OutlineParams.w > 0.5
 		? texture(AlphaTexture, uv).a * BaseColor.a * vertexColor.a : 1.0;
+#ifndef TOON_SHADER_OUTLINE
 	if (alpha < Flags.x) {
 		discard;
 	}
+#endif
 
 #ifdef TOON_SHADER_DEPTH_ONLY
 	fragColor = vec4(0.0);
@@ -203,7 +207,10 @@ void main() {
 	vec3 vertexTint = profiled ? vec3(1.0) : vertexColor.rgb;
 	vec3 albedo = srgbToLinear(baseSample.rgb) * BaseColor.rgb * vertexTint;
 	if (facePixel) {
-		float blushMask = FaceParams.w > 0.5 ? texture(FaceLightMapTexture, uv).b : baseSample.a;
+		// Official face inputs carry the blush mask in the face light map's blue
+		// channel; only the legacy single-sheet layout had to fall back to the base
+		// texture's alpha, which covers the whole face and cannot localise a blush.
+		float blushMask = FaceParams.w > 0.5 ? baseSample.a : texture(FaceLightMapTexture, uv).b;
 		albedo = mix(albedo, srgbToLinear(BlushColor.rgb), FaceParams.z * blushMask);
 	}
 	vec3 rampColor = shadowColor(shadow, material, 1.0 - Flags2.y);

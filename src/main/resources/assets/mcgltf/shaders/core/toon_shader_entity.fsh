@@ -115,7 +115,12 @@ float materialRow(float encodedMaterial) {
 vec3 shadowColor(float shadow, float material, float day) {
     float rangeMin = 0.5 + ShadowParams.x - ShadowParams.y;
     float rangeMax = 0.5 + ShadowParams.x;
-    vec2 rampUv = vec2(smoothstep(rangeMin, rangeMax, shadow), material / 10.0 + 0.5 * day + 0.05);
+    // Genshin ramp sheets are authored for Unity, whose V axis runs bottom-up, so the
+    // five daylight rows sit at the top of the image. Minecraft samples V top-down,
+    // and the row address has to be mirrored for those sheets to land on the right
+    // material bands instead of swapping day for night.
+    vec2 rampUv = vec2(smoothstep(rangeMin, rangeMax, shadow),
+        1.0 - (material / 10.0 + 0.5 * day + 0.05));
     vec3 ramp = srgbToLinear(texture(RampTexture, rampUv).rgb);
     vec3 color = ramp * mix(ShadeColor.rgb, vec3(1.0), smoothstep(0.9, 1.0, rampUv.x));
     return mix(color, vec3(1.0), step(rangeMax, shadow));
@@ -207,7 +212,9 @@ void main() {
 
     vec3 halfDirection = normalize(lightDirection + viewDirection);
     float blinnPhong = pow(max(dot(normal, halfDirection), 0.0), max(SpecularParams.x, 0.0001));
-    vec3 matcap = srgbToLinear(texture(MatcapTexture, normal.xy * 0.5 + 0.5).rgb);
+    // Matcap sheets are authored with the highlight upwards under Unity's bottom-up
+    // V axis, so the lookup is mirrored to keep metal lit from above here.
+    vec3 matcap = srgbToLinear(texture(MatcapTexture, vec2(normal.x, -normal.y) * 0.5 + 0.5).rgb);
     vec3 nonMetallic = vec3(step(1.1, lightMap.b + blinnPhong) * lightMap.r * MaterialParams.z);
     vec3 metallic = blinnPhong * lightMap.b * albedo * matcap * MaterialParams.w;
     float metalSelector = max(step(0.9, lightMap.r), SpecularParams.z);

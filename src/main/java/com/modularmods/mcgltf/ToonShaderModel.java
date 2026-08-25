@@ -83,9 +83,16 @@ final class ToonShaderModel {
 		return ramp;
 	}
 
+	/**
+	 * Neutral light map for models that ship no authored one. Following the Genshin
+	 * channel convention this is no specular, a green shadow threshold of one half so
+	 * the Lambert term alone decides where the terminator falls, no highlight, and an
+	 * alpha that selects the shader's fallback ramp band. A fully green pixel would
+	 * read as "always lit" and leave every unprofiled model unshaded.
+	 */
 	Identifier defaultLightMap(RenderedGltfModel.TextureRegistry textures) {
 		if (defaultLightMap == null) {
-			defaultLightMap = textures.solid(0xFF00FF00);
+			defaultLightMap = textures.solid(0x00008000);
 		}
 		return defaultLightMap;
 	}
@@ -113,21 +120,37 @@ final class ToonShaderModel {
 		return profile.baseColorScale;
 	}
 
+	/**
+	 * Fallback shadow ramp laid out like the official Genshin ramp sheets: five
+	 * material bands per daylight state, ordered for Unity's bottom-up V axis so the
+	 * daylight bands sit in the top half. Band order follows the material index the
+	 * shader derives from the light map alpha, which is soft cloth, skin, hair, metal
+	 * and then everything else.
+	 */
 	private static NativeImage defaultRamp() {
-		int[][] night = {{72, 56, 78}, {52, 64, 88}, {78, 54, 48}, {54, 72, 66}, {62, 58, 74}};
-		int[][] day = {{126, 82, 92}, {78, 104, 142}, {140, 82, 64}, {76, 118, 92}, {100, 86, 118}};
+		int[][] day = {{132, 116, 126}, {160, 112, 112}, {120, 116, 148}, {100, 106, 134},
+			{130, 126, 138}};
+		int[][] night = {{86, 82, 116}, {102, 78, 100}, {76, 80, 130}, {64, 74, 116}, {84, 88, 122}};
 		NativeImage image = new NativeImage(256, 10, false);
-		for (int y = 0; y < 10; y++) {
-			int[] shadow = (y < 5 ? night : day)[y % 5];
-			for (int x = 0; x < 256; x++) {
-				float t = x / 255.0F;
-				int red = Math.round(shadow[0] + (255 - shadow[0]) * t);
-				int green = Math.round(shadow[1] + (255 - shadow[1]) * t);
-				int blue = Math.round(shadow[2] + (255 - shadow[2]) * t);
-				image.setPixel(x, y, 0xFF000000 | blue << 16 | green << 8 | red);
-			}
+		for (int band = 0; band < 5; band++) {
+			writeRampRow(image, 4 - band, day[band]);
+			writeRampRow(image, 9 - band, night[band]);
 		}
 		return image;
+	}
+
+	private static void writeRampRow(NativeImage image, int y, int[] shadow) {
+		for (int x = 0; x < 256; x++) {
+			// Official sheets hold the shadow colour flat and only lift to white near
+			// the right edge, which keeps the terminator readable at any smoothness.
+			float t = x / 255.0F;
+			float lift = Mth.clamp((t - 0.72F) / 0.28F, 0.0F, 1.0F);
+			lift = lift * lift * (3.0F - 2.0F * lift);
+			int red = Math.round(shadow[0] + (255 - shadow[0]) * lift);
+			int green = Math.round(shadow[1] + (255 - shadow[1]) * lift);
+			int blue = Math.round(shadow[2] + (255 - shadow[2]) * lift);
+			image.setPixel(x, y, 0xFF000000 | blue << 16 | green << 8 | red);
+		}
 	}
 
 	record Frame(Vector3f headForward, Vector3f headRight, Vector3f mainLightDirection, float night) {

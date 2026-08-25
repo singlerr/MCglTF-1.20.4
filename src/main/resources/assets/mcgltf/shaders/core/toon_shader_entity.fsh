@@ -141,7 +141,7 @@ void main() {
     vec2 screenUv = gl_FragCoord.xy / vec2(sceneSize);
     float sceneEyeDepth = linearEyeDepth(texture(SceneDepth, screenUv).r);
     float currentEyeDepth = abs(viewPosition.z);
-    if (currentEyeDepth > sceneEyeDepth + max(0.002, currentEyeDepth * 0.0002)) {
+    if (currentEyeDepth > sceneEyeDepth + max(0.002, currentEyeDepth * 0.002)) {
         discard;
     }
 

@@ -136,6 +136,21 @@ class ToonShaderResourceTest {
 			.contains("normalScale = material.getNormalScale();"));
 	}
 
+	@Test
+	void toleratesBiasedSelfDepthWithoutDisablingForegroundOcclusion() throws Exception {
+		String fragment = resource("toon_shader_entity.fsh");
+		assertTrue(fragment.contains(
+			"currentEyeDepth > sceneEyeDepth + max(0.002, currentEyeDepth * 0.002)"));
+	}
+
+	@Test
+	void toonRequestsSkipTheShaderPackEntityPass() throws Exception {
+		String model = Files.readString(Path.of(
+			"src/main/java/com/modularmods/mcgltf/RenderedGltfModel.java"));
+		assertTrue(model.contains("if (queueToon) {"));
+		assertTrue(model.contains("} else {\n\t\t\t\t\t\trender(pose, consumer, light, overlay, geometry, submittedIndices);"));
+	}
+
 	private static void assertDirection(Vector3f direction, float x, float y) {
 		assertEquals(x, direction.x, 0.00001F);
 		assertEquals(y, direction.y, 0.00001F);

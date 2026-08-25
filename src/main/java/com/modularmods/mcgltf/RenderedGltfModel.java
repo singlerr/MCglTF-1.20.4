@@ -500,11 +500,12 @@ public class RenderedGltfModel {
 				&& material.toonMaterial() != null && toonGeometry != null && geometry.tangents != null;
 			collector.submitCustomGeometry(poseStack, material.renderType(shaderModActive),
 				(pose, consumer) -> {
-					render(pose, consumer, light, overlay, geometry, submittedIndices);
 					if (queueToon) {
-					material.toonMaterial().queue(pose, geometry.positions, geometry.normals, geometry.tangents,
-						toonGeometry.smoothNormals(), texcoords, backTexcoords, toonVertexColors, submittedIndices,
-						light, toonFrame);
+						material.toonMaterial().queue(pose, geometry.positions, geometry.normals, geometry.tangents,
+							toonGeometry.smoothNormals(), texcoords, backTexcoords, toonVertexColors, submittedIndices,
+							light, toonFrame);
+					} else {
+						render(pose, consumer, light, overlay, geometry, submittedIndices);
 					}
 				});
 			if (!shaderModActive && packedOverlay == MTOON_OVERLAY_REQUEST && material.outlineRenderType() != null) {

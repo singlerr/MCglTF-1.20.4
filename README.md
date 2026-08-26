@@ -108,6 +108,28 @@ neutral textures; they are never inferred from unrelated model channels. `outlin
 height in `screen` mode and centimeters in `world` mode; VRM 1.0 factors are converted to those units without adding
 distance fade that the material did not request.
 
+### Deriving sidecar data in game or offline
+
+The same v2 sidecar derivation used by Celerant's Python tool lives in MCglTF as
+`ToonAssetGenerator`. Callers pass a loaded VRM path; the generator writes
+`model.vrm.toon.json` and its PNG sheets beside the model. It only runs when
+invoked, never overwrites existing outputs, and performs UV rasterization plus
+eight-bit resampling off the render thread because it reads every material
+texture in the model.
+
+Face material selection, head-bone separation, VRM 0.x/1.0 forward/right axes,
+material classification, LightMap and face SDF synthesis, ramp/matcap sheets,
+smooth-normal generation, and geometry-based blush/eye placement follow the same
+algorithms as Celerant's [`scripts/vrm_toon_assets.py`](https://github.com/westernbear/celerant/blob/main/scripts/vrm_toon_assets.py).
+`ToonAssetParityTest` derives the Sendagaya CC0 fixture both ways and requires
+every sheet to agree within a one-level tolerance on a handful of channels at
+most.
+
+Outline rendering uses Unity-style view-space expansion from smooth or geometric
+normals, separate outline-pass depth bias, and skips scene-depth discard and
+alpha cutout on the outline pass so silhouettes stay continuous under Iris
+ShaderPacks.
+
 ## Tests
 
 ```bash

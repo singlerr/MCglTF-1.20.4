@@ -80,7 +80,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build release artifacts
-        run: ./gradlew clean build --no-daemon
+        run: ./gradlew clean build :common:test --no-daemon
 
       - name: Collect release artifacts
         shell: bash
@@ -88,13 +88,13 @@ jobs:
           set -euo pipefail
           mkdir -p release-artifacts
           mapfile -t artifacts < <(
-            find build/libs -maxdepth 1 -type f -name '*.jar' \
+            find api/build/libs fabric/build/libs neoforge/build/libs -maxdepth 1 -type f -name '*.jar' \
               ! -name '*-dev.jar' \
-              ! -name '*-all.jar' \
+              ! -name '*-javadoc.jar' \
               -print | sort
           )
           if (( ${#artifacts[@]} == 0 )); then
-            echo "No release JARs found in build/libs" >&2
+            echo "No release JARs found in loader subprojects" >&2
             exit 1
           fi
           cp "${artifacts[@]}" release-artifacts/

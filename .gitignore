@@ -1,9 +1,53 @@
+# gradle
 .gradle/
 build/
+build-logic/.gradle/
+build-logic/build/
+
+# minecraft run directories
 run/
+runs/
+
+# logs and diagnostics
 logs/
+*.log
+crash-reports/
+screenshots/
+
+# local tooling and agent state
 .codex/
 .gstack/
-
 graphify-out/
+.cursor/
+
+# release workflow scratch dir
+release-artifacts/
+
+# local test fixtures (not redistributable)
 test_models/
+
+# eclipse
+bin/
+*.launch
+.settings/
+.metadata
+.classpath
+.project
+eclipse/
+
+# intellij / idea
+out/
+*.ipr
+*.iws
+*.iml
+.idea/*
+!.idea/scopes
+
+# vscode (keep shared settings if added later)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# os
+.DS_Store
+Thumbs.db

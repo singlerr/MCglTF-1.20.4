@@ -1,0 +1,31 @@
+modLoader = "javafml"
+loaderVersion = "${neoforge_loader_version_range}"
+license = "${license}"
+
+[[mods]]
+modId = "mcgltf-gametest"
+version = "${version}"
+displayName = "MCglTF NeoForge GameTest"
+authors = "${mod_author}"
+description = "Client render harness for MCglTF NeoForge validation."
+
+[[dependencies.mcgltf-gametest]]
+modId = "mcgltf"
+type = "required"
+versionRange = "[${version},)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies.mcgltf-gametest]]
+modId = "neoforge"
+type = "required"
+versionRange = "[${neoforge_version},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.mcgltf-gametest]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"

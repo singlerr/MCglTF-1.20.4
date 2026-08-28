@@ -1,37 +1,82 @@
-# MCglTF for Fabric 26.2
+# MCglTF for Minecraft 26.2
 
-A client-side glTF/GLB/VRM model loader for Minecraft 26.2. Models are submitted through Minecraft's Blaze3D
-render pipeline, so vanilla rendering, Iris 1.11.x, entity passes, and first-person hand passes share the same state
-management instead of using raw OpenGL hooks.
+A client-side glTF/GLB/VRM model loader for Minecraft 26.2 on **Fabric** and **NeoForge**. Models are submitted through Minecraft's Blaze3D render pipeline, so vanilla rendering, Iris 1.11.x, entity passes, and first-person hand passes share the same state management instead of using raw OpenGL hooks.
 
 [![](https://cf.way2muchnoise.eu/title/mcgltf.svg)](https://www.curseforge.com/minecraft/mc-mods/mcgltf) [![](https://cf.way2muchnoise.eu/versions/mcgltf.svg)](https://www.curseforge.com/minecraft/mc-mods/mcgltf) [![](https://cf.way2muchnoise.eu/mcgltf.svg)](https://www.curseforge.com/minecraft/mc-mods/mcgltf)
 
 ## Requirements
 
 - Minecraft 26.2
+- Java 25
+
+**Fabric**
+
 - Fabric Loader 0.19.3 or newer
 - Fabric API 0.156.0+26.2
-- Java 25
+
+**NeoForge**
+
+- NeoForge 26.2.0.1-beta or newer
+
+## Project layout
+
+This repository is a [MultiLoader-Template](https://github.com/jaredlll08/MultiLoader-Template) style Gradle project:
+
+| Module | Output | Purpose |
+|--------|--------|---------|
+| `api` | `mcgltf-api-26.2-*.jar` | Stable public API for dependent mods (`modCompileOnly`) |
+| `fabric` | `MCglTF-Fabric-26.2-*.jar` | Fabric runtime |
+| `neoforge` | `MCglTF-NeoForge-26.2-*.jar` | NeoForge runtime |
+| `common` | internal | Shared renderer implementation |
 
 ## Usage
 
-Register once during client initialization. The returned handle always points at the model prepared by the latest
-resource reload:
+Register once during client initialization. The returned handle always points at the model prepared by the latest resource reload:
 
 ```java
-GltfModelHandle model = MCglTF.getInstance().registerModel(
+import com.modularmods.mcgltf.api.GltfModelHandle;
+import com.modularmods.mcgltf.api.MCglTFApi;
+
+GltfModelHandle handle = MCglTFApi.get().registerModel(
     Identifier.fromNamespaceAndPath("example", "models/avatar.vrm"));
 
-if (model.isReady()) {
-    model.get().submit(sceneIndex, poseStack, submitNodeCollector, packedLight, packedOverlay);
+if (handle.isReady()) {
+    handle.renderable().submit(sceneIndex, poseStack, submitNodeCollector, packedLight, packedOverlay);
 }
 ```
 
-Call `model.close()` when the registration is no longer needed. `IGltfModelReceiver` remains available only for
-advanced callers that need to inspect the parsed glTF before sharing a rendered model. Do not store the result of
-`model.get()` across resource reloads; keep the handle and read its current value when submitting.
+Call `handle.close()` when the registration is no longer needed. Do not cache `handle.renderable()` across resource reloads; keep the handle and read its current renderable when submitting.
 
-- https://github.com/ModularMods/MCglTF-Example
+Example mod: https://github.com/ModularMods/MCglTF-Example
+
+### Dependent mod Gradle (Fabric)
+
+```gradle
+dependencies {
+    modCompileOnly "com.modularmods.mcgltf:mcgltf-api:26.2-2.4.0"
+    modRuntimeOnly "com.modularmods.mcgltf:MCglTF-Fabric:26.2-2.4.0"
+}
+```
+
+For local development in this repo:
+
+```gradle
+dependencies {
+    modCompileOnly project(":api")
+    modRuntimeOnly project(":fabric")
+}
+```
+
+### Migration from 26.2-Fabric-2.3.x
+
+| Before | After |
+|--------|-------|
+| `MCglTF.getInstance()` | `MCglTFApi.get()` |
+| `handle.get().submit(...)` | `handle.renderable().submit(...)` |
+| `IGltfModelReceiver` | `GltfModelReceiver` (api module; simplified hook) |
+| Direct `RenderedGltfModel` usage | Use `GltfRenderable` from the api module |
+
+Implementation types (`RenderedGltfModel`, `ToonShader`, etc.) remain in the internal `common` module and are not part of the stable api contract.
 
 ## Features
 
@@ -52,22 +97,13 @@ advanced callers that need to inspect the parsed glTF before sharing a rendered 
 - [x] Angle-limited smooth MToon normals and standard-entity inverted-hull outlines
 - [x] Optional ToonShader materials with LightMap ramps, face SDF, head axes, depth rim, material outlines, matcap/specular, emission, blush, and day/night ramps
 
-MToon uses a dedicated managed Blaze3D entity pass when ShaderPacks are off: the VRM 0.x `VRM.materialProperties` base
-and shade textures are mixed at the material's `_ShadeShift`/`_ShadeToony` light boundary with a small parameter rim.
-The controls travel in the generated shade texture alpha, which the managed pass restores before writing opacity.
-When Iris has an active ShaderPack, ordinary MCglTF callers still use its standard entity pass and never enter the
-ToonShader renderer. ToonShader is opt-in: construct `RenderedGltfModel` with a sidecar path, submit
-`RenderedGltfModel.MTOON_OVERLAY_REQUEST`, capture the world projection with `ToonShader.captureProjection`, and call
-`ToonShader.renderFrame()` after Iris finishes its final pass. The optional renderer shades those model primitives in
-its own HDR color/depth targets, depth-tests them against the scene, then premultiplied-composites the result. It does
-not transform ShaderPack GLSL or write unknown G-buffer attachments.
+MToon uses a dedicated managed Blaze3D entity pass when ShaderPacks are off: the VRM 0.x `VRM.materialProperties` base and shade textures are mixed at the material's `_ShadeShift`/`_ShadeToony` light boundary with a small parameter rim. The controls travel in the generated shade texture alpha, which the managed pass restores before writing opacity. When Iris has an active ShaderPack, ordinary MCglTF callers still use its standard entity pass and never enter the ToonShader renderer.
+
+ToonShader remains an internal opt-in path. Use `GltfRenderable.MTOON_OVERLAY_REQUEST` when submitting through the public api; advanced ToonShader frame composition still lives in the internal renderer.
 
 ### Optional ToonShader sidecar
 
-The sidecar is JSON version 2 (version 1 remains supported) and normally sits beside the model as
-`model.vrm.toon.json`. PNG paths are relative to that file and must stay in the same directory tree. Invalid
-material/node/primitive references, traversal, non-PNG textures, profiles over 1 MiB, or textures over 64 MiB fail
-model preparation instead of guessing.
+The sidecar is JSON version 2 (version 1 remains supported) and normally sits beside the model as `model.vrm.toon.json`. PNG paths are relative to that file and must stay in the same directory tree. Invalid material/node/primitive references, traversal, non-PNG textures, profiles over 1 MiB, or textures over 64 MiB fail model preparation instead of guessing.
 
 ```json
 {
@@ -93,71 +129,47 @@ model preparation instead of guessing.
 }
 ```
 
-Material entries accept `index` or an unambiguous `name`; `primitives` entries accept a mesh selector plus its
-`primitive` index. Version 2 face entries require separate `faceLightMap` and `faceShadow` textures and may select
-`mirrored-r` or `directional-rg` with `faceSdfLayout`; version 1 retains the packed `faceMap` input. Texture inputs are
-`baseTexture`, `shadeTexture`, `normalTexture`, `emissionTexture`, `matcapTexture`, `rimTexture`,
-`outlineWidthTexture`, `lightMap`, `rampTexture`, `faceMap`, `faceLightMap`, and `faceShadow`. Controls are
-`materialType`, `face`, `metallic`, `outline`, `outlineMode`, `outlineVertexAlpha`, `backUv`, `shadowOffset`,
-`shadowSmoothness`, `nonMetalSpecular`, `metalSpecular`, `specularShininess`, `emissionIntensity`, `rimOffset`,
-`rimThreshold`, `rimIntensity`, `rimPower`, `outlineWidth`, `outlineDistanceNear`, `outlineDistanceFar`,
-`outlineScaleNear`, `outlineScaleFar`, `outlineZOffset`, `outlineLightingMix`, `faceShadowStrength`,
-`faceShadowOffset`, `blushIntensity`, `shadeColor`, `emissionColor`, `rimColor`, `outlineColor`, five-entry
-`outlineColors`, `blushColor`, and `[baseX, baseY, outlineX, outlineY]` `screenOffset`. Missing nonstandard inputs use
-neutral textures; they are never inferred from unrelated model channels. `outlineWidth` is a percentage of screen
-height in `screen` mode and centimeters in `world` mode; VRM 1.0 factors are converted to those units without adding
-distance fade that the material did not request.
+Material entries accept `index` or an unambiguous `name`; `primitives` entries accept a mesh selector plus its `primitive` index. Version 2 face entries require separate `faceLightMap` and `faceShadow` textures and may select `mirrored-r` or `directional-rg` with `faceSdfLayout`; version 1 retains the packed `faceMap` input.
 
 ### Deriving sidecar data in game or offline
 
-The same v2 sidecar derivation used by Celerant's Python tool lives in MCglTF as
-`ToonAssetGenerator`. Callers pass a loaded VRM path; the generator writes
-`model.vrm.toon.json` and its PNG sheets beside the model. It only runs when
-invoked, never overwrites existing outputs, and performs UV rasterization plus
-eight-bit resampling off the render thread because it reads every material
-texture in the model.
+The same v2 sidecar derivation used by Celerant's Python tool lives in MCglTF as `ToonAssetGenerator`. Callers pass a loaded VRM path; the generator writes `model.vrm.toon.json` and its PNG sheets beside the model.
 
-Face material selection, head-bone separation, VRM 0.x/1.0 forward/right axes,
-material classification, LightMap and face SDF synthesis, ramp/matcap sheets,
-smooth-normal generation, and geometry-based blush/eye placement follow the same
-algorithms as Celerant's [`scripts/vrm_toon_assets.py`](https://github.com/westernbear/celerant/blob/main/scripts/vrm_toon_assets.py).
-`ToonAssetParityTest` derives the Sendagaya CC0 fixture both ways and requires
-every sheet to agree within a one-level tolerance on a handful of channels at
-most.
+## Development
 
-Outline rendering uses Unity-style view-space expansion from smooth or geometric
-normals, separate outline-pass depth bias, and skips scene-depth discard and
-alpha cutout on the outline pass so silhouettes stay continuous under Iris
-ShaderPacks.
+```bash
+./gradlew build                  # api + fabric + neoforge jars, unit tests
+./gradlew :common:test           # JUnit unit tests
+./gradlew :fabric:runClient      # Fabric dev client
+./gradlew :neoforge:runClient    # NeoForge dev client
+```
 
 ## Tests
 
 ```bash
-./gradlew test runClientGameTest
-./gradlew runClientGameTest -PirisRuntime=true -PrequireIris=true -PshaderPack=/absolute/path/to/pack.zip
+./gradlew :common:test
+./gradlew :fabric:runClientGameTest
+./gradlew :neoforge:runClientGameTest
+./gradlew :fabric:runClientGameTest -PirisRuntime=true -PrequireIris=true -PshaderPack=/absolute/path/to/pack.zip
 ```
 
-Client GameTests copy the VRM fixtures from `test_models/` and capture first-person, third-person, and entity-gaze
-screenshots. The gaze test also verifies that rendering and then removing a VRM does not corrupt surrounding item or
-world textures. The same run renders 1, 2, 4, and 8 mixed VRM instances and logs average/max submit time, frame time,
-and submitted vertices. Iris tests use its OpenGL backend; Iris does not run on Minecraft 26.2's experimental Vulkan
-backend.
+Fabric Client GameTests copy the VRM fixtures from `test_models/` and capture first-person, third-person, and entity-gaze screenshots. NeoForge uses a client render harness on `SubmitCustomGeometryEvent` with an optional smoke benchmark when `-Dmcgltf.gametest.smoke=true` is set (as in `runClientGameTest`).
 
-VRM fixtures are intentionally excluded from Git because their licenses do not permit redistribution. Place authorized
-local copies at `test_models/transformed_wakgood.vrm` and `test_models/transformed_jingburger.vrm`; fixture-dependent
-unit tests are skipped and `runClientGameTest` is disabled when they are absent.
+VRM fixtures are intentionally excluded from Git because their licenses do not permit redistribution. Place authorized local copies at `test_models/transformed_wakgood.vrm` and `test_models/transformed_jingburger.vrm`; fixture-dependent GameTests are disabled when they are absent.
 
 ## Release
 
-Set `mod_version` in `gradle.properties`, commit and push the release commit, then run:
+Set `version` in `gradle.properties`, commit and push the release commit, then run:
 
 ```bash
 ./scripts/release.sh
 ```
 
-The script creates and pushes `v<mod_version>`. GitHub Actions validates that the tag matches `mod_version`, builds
-with Java 25, and creates a GitHub Release containing the remapped and sources JARs. The same release can be started
-from **Actions → Release → Run workflow** by entering the exact `mod_version`; that path creates the tag in CI.
+GitHub Actions builds and publishes:
+
+- `mcgltf-api-26.2-*.jar`
+- `MCglTF-Fabric-26.2-*.jar` (+ sources)
+- `MCglTF-NeoForge-26.2-*.jar` (+ sources)
 
 ## Credit
 
